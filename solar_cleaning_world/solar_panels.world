@@ -1,0 +1,76 @@
+<?xml version="1.0" ?>
+<sdf version="1.7">
+
+  <world name="solar_cleaning_world">
+
+    <!-- Physics -->
+    <physics name="default_physics" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <!-- Custom Light -->
+    <light name="sunlight" type="directional">
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse>
+      <specular>0.1 0.1 0.1 1</specular>
+      <direction>-0.3 0 -1</direction>
+    </light>
+
+    <!-- Ground -->
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <!-- Solar Panel 1 -->
+    <model name="solar_panel_1">
+      <static>true</static>
+
+      <link name="panel_link_1">
+        <pose>0 0 0.6 0.87 0 0</pose>
+
+        <collision name="collision_1">
+          <geometry>
+            <box>
+              <size>2.0 1.0 0.05</size>
+            </box>
+          </geometry>
+        </collision>
+
+        <visual name="visual_1">
+          <geometry>
+            <box>
+              <size>2.0 1.0 0.05</size>
+            </box>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Solar Panel 2 -->
+    <model name="solar_panel_2">
+      <static>true</static>
+
+      <link name="panel_link_2">
+        <pose>2.25 0 0.7 0.87 0 0</pose>
+
+        <collision name="collision_2">
+          <geometry>
+            <box>
+              <size>2.0 1.0 0.05</size>
+            </box>
+          </geometry>
+        </collision>
+
+        <visual name="visual_2">
+          <geometry>
+            <box>
+              <size>2.0 1.0 0.05</size>
+            </box>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>
