@@ -1,159 +1,148 @@
-"""
-Main PyBullet Simulation
-Solar Panel Cleaning Robot - Complete Demo
-"""
-
 import sys
 import os
+import time
+
 from pybullet_environment import SolarPanelEnvironment
 from pybullet_controller import RobotController, ManualController
 
 
-def run_autonomous_simulation(urdf_path):
-    """Run autonomous cleaning simulation"""
-    
-    print("\n" + "="*60)
-    print("AUTONOMOUS SOLAR PANEL CLEANING SIMULATION")
-    print("="*60)
-    
-    # Create environment
-    env = SolarPanelEnvironment(gui=True, urdf_path=urdf_path)
-    
-    # Add dirt patches for visualization
+def _banner(title):
+    print("\n" + "=" * 62)
+    print(f"  {title}")
+    print("=" * 62)
+
+
+def _get_urdf():
+    default = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "solar_robot_pybullet.urdf"
+    )
+    raw = input(f"\n  URDF path  [{default}]: ").strip()
+    path = raw if raw else default
+    if not os.path.exists(path):
+        print(f"\n❌  URDF not found: {path}")
+        sys.exit(1)
+    return path
+
+
+def _get_tilt():
+    raw = input(
+        "\n  Panel tilt angle in degrees  [0 = flat, 25 = typical install]: "
+    ).strip()
+    try:
+        t = float(raw) if raw else 0.0
+        t = max(0.0, min(t, 50.0))
+        return t
+    except ValueError:
+        print("  Invalid input – using 0°")
+        return 0.0
+
+
+def _get_vacuum():
+    raw = input(
+        "\n  Vacuum suction force in Newtons  [180 = default, 0 = disabled]: "
+    ).strip()
+    try:
+        return max(0.0, float(raw)) if raw else 180.0
+    except ValueError:
+        return 180.0
+
+
+def run_autonomous(urdf_path, tilt, vacuum):
+    _banner(f"AUTONOMOUS CLEANING  │  tilt={tilt:.1f}°  suction={vacuum:.0f}N")
+    env = SolarPanelEnvironment(
+        gui=True, urdf_path=urdf_path, panel_tilt_deg=tilt, vacuum_force_N=vacuum
+    )
     env.add_dirt_patches()
-    
     if env.robot_id is None:
-        print("ERROR: Robot not loaded. Check URDF path.")
+        print("Robot not loaded.")
+        env.disconnect()
         return
-    
-    # Create autonomous controller
-    controller = RobotController(env.robot_id, env)
-    
-    # Run autonomous mission
-    print("\nStarting autonomous cleaning in 3 seconds...")
-    print("Close window to stop.")
-    
-    import time
+
+    ctrl = RobotController(env.robot_id, env)
+    print("\nStarting in 3 s …  (Ctrl-C to abort)")
     time.sleep(3)
-    
+
     try:
-        controller.run_autonomous(max_steps=50000)
+        ctrl.run_autonomous()
     except KeyboardInterrupt:
-        print("\nSimulation stopped by user")
-    
-    print("\nSimulation complete. Close window to exit.")
-    
-    # Keep window open
+        print("\nAborted.")
+
+    print("\nMission done. Close window or Ctrl-C.")
     try:
         while True:
             env.step_simulation()
-            time.sleep(1./240.)
+            time.sleep(1.0 / 240.0)
     except KeyboardInterrupt:
         pass
-    
     env.disconnect()
 
 
-def run_manual_simulation(urdf_path):
-    """Run manual control simulation"""
-    
-    print("\n" + "="*60)
-    print("MANUAL CONTROL SIMULATION")
-    print("="*60)
-    
-    # Create environment
-    env = SolarPanelEnvironment(gui=True, urdf_path=urdf_path)
-    
-    # Add dirt patches
+def run_manual(urdf_path, tilt, vacuum):
+    _banner(f"MANUAL CONTROL  │  tilt={tilt:.1f}°  suction={vacuum:.0f}N")
+    env = SolarPanelEnvironment(
+        gui=True, urdf_path=urdf_path, panel_tilt_deg=tilt, vacuum_force_N=vacuum
+    )
     env.add_dirt_patches()
-    
     if env.robot_id is None:
-        print("ERROR: Robot not loaded. Check URDF path.")
+        print("Robot not loaded.")
+        env.disconnect()
         return
-    
-    # Create manual controller
-    controller = ManualController(env.robot_id, env)
-    
-    # Run manual control
+
+    ctrl = ManualController(env.robot_id, env)
     try:
-        controller.run()
+        ctrl.run()
     except KeyboardInterrupt:
-        print("\nManual control ended")
-    
+        print("\nManual control ended.")
     env.disconnect()
 
 
-def run_environment_only():
-    """Run environment without robot (for testing)"""
-    
-    print("\n" + "="*60)
-    print("ENVIRONMENT TEST - Solar Panel Array Only")
-    print("="*60)
-    
-    # Create environment without robot
-    env = SolarPanelEnvironment(gui=True, urdf_path=None)
-    
-    # Add dirt
+def run_env_only(tilt):
+    _banner(f"ENVIRONMENT VIEWER  │  tilt={tilt:.1f}°  (no robot)")
+    env = SolarPanelEnvironment(gui=True, panel_tilt_deg=tilt)
     env.add_dirt_patches()
-    
-    print("\nEnvironment loaded. Close window to exit.")
-    
-    import time
+    print("Running. Ctrl-C to exit.")
     try:
         while True:
             env.step_simulation()
-            time.sleep(1./240.)
+            time.sleep(1.0 / 240.0)
     except KeyboardInterrupt:
         pass
-    
     env.disconnect()
 
 
 def main():
-    """Main entry point"""
-    
-    print("\n" + "="*60)
-    print("SOLAR PANEL CLEANING ROBOT - PYBULLET SIMULATION")
-    print("="*60)
-    print("\nSelect simulation mode:")
-    print("  1 - Autonomous cleaning (robot cleans all panels)")
-    print("  2 - Manual control (keyboard control)")
-    print("  3 - Environment only (no robot, just panels)")
-    print("  q - Quit")
-    
-    choice = input("\nEnter choice (1/2/3/q): ").strip()
-    
-    if choice == 'q':
-        print("Exiting...")
+    # Allow quick CLI launch: script.py <mode> <tilt>
+    cli_mode = sys.argv[1] if len(sys.argv) > 1 else None
+    cli_tilt = float(sys.argv[2]) if len(sys.argv) > 2 else None
+    cli_vac = float(sys.argv[3]) if len(sys.argv) > 3 else None
+
+    _banner("SOLAR PANEL CLEANING ROBOT  –  PyBullet Simulation")
+    print(
+        """
+  1  Autonomous cleaning  (full snake-path mission)
+  2  Manual control       (keyboard-driven + J for auto-cross)
+  3  Environment only     (panel array viewer, no robot)
+  q  Quit
+"""
+    )
+    choice = cli_mode if cli_mode else input("  Choice: ").strip().lower()
+
+    if choice == "q":
+        print("Bye!")
         return
-    
-    # Get URDF path
-    urdf_path = None
-    if choice in ['1', '2']:
-        print("\nEnter path to robot URDF file:")
-        print("(or press Enter to use: ./solar_robot_correct.urdf)")
-        
-        user_path = input("URDF path: ").strip()
-        
-        if user_path:
-            urdf_path = user_path
-        else:
-            urdf_path = "./solar_robot_correct.urdf"
-        
-        if not os.path.exists(urdf_path):
-            print(f"\nERROR: URDF file not found: {urdf_path}")
-            print("Please provide correct path to solar_robot_correct.urdf")
-            return
-    
-    # Run selected simulation
-    if choice == '1':
-        run_autonomous_simulation(urdf_path)
-    elif choice == '2':
-        run_manual_simulation(urdf_path)
-    elif choice == '3':
-        run_environment_only()
+    elif choice in ("1", "2"):
+        tilt = cli_tilt if cli_tilt is not None else _get_tilt()
+        vacuum = cli_vac if cli_vac is not None else _get_vacuum()
+        urdf = _get_urdf()
+        if choice == "1":
+            run_autonomous(urdf, tilt, vacuum)
+        elif choice == "2":
+            run_manual(urdf, tilt, vacuum)
+    elif choice == "3":
+        tilt = cli_tilt if cli_tilt is not None else _get_tilt()
+        run_env_only(tilt)
     else:
-        print("Invalid choice")
+        print("Invalid choice.")
 
 
 if __name__ == "__main__":
