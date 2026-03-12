@@ -1,792 +1,346 @@
 """
-PyBullet Robot Controller
-Autonomous solar panel cleaning with bridge mechanism
+pybullet_controller.py
+Manual keyboard controller for the solar panel cleaning robot.
+No autonomous code.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WHEEL VELOCITY — WHY THE SIGNS ARE WHAT THEY ARE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+All wheel joints: rpy="1.5708 0 0", axis xyz="0 0 1"
+Rx(90°) rotates local Z → world −Y.
+PyBullet positive velocity = CCW about −Y = CW about +Y.
+CW about +Y → wheel bottom moves in +X → robot moves FORWARD.
+
+  FORWARD  : set_wheels(+v, +v)   both sides positive
+  BACKWARD : set_wheels(−v, −v)   both sides negative
+  ROT LEFT : set_wheels(−v, +v)   left back, right fwd
+  ROT RIGHT: set_wheels(+v, −v)   left fwd, right back
+
+No negation is applied inside set_wheels().
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+KEY BINDINGS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Movement (hold key):
+  ↑  /  W      Forward
+  ↓  /  S      Backward
+  ←  /  A      Rotate left
+  →  /  D      Rotate right
+
+Brush:
+  B            Toggle brush spin ON / OFF
+
+Cleaning:
+  C            Confirm current panel cleaned.
+               Tip: spin brush (B), sweep the panel (↑↓),
+               then press C to remove dirt visuals.
+
+Front bridge (press repeatedly to extend 10 cm at a time):
+  1            Front seg1  +10 cm  (max 40 cm)
+  2            Front seg2  +10 cm  (max 30 cm)
+  0            Retract front bridge fully
+
+Rear bridge:
+  3            Rear seg1  +10 cm  (max 40 cm)
+  4            Rear seg2  +10 cm  (max 30 cm)
+  9            Retract rear bridge fully
+
+Suction legs (bridge tip pads):
+  F            Toggle FRONT tip suction pads DOWN / UP
+  R            Toggle REAR  tip suction pads DOWN / UP
+
+Body lift (for gap crossing):
+  L            Lift body +5 mm  (max 50 mm)
+  K            Lower body −5 mm
+
+Info:
+  P            Print robot position + panel status
+  Q / Esc      Quit
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 import pybullet as p
 import numpy as np
 import time
-from enum import Enum
 
 
-class RobotState(Enum):
-    """Robot operational states"""
-    IDLE = 0
-    SCANNING = 1
-    CLEANING = 2
-    APPROACHING_GAP = 3
-    DEPLOYING_BRIDGE = 4
-    CROSSING_GAP = 5
-    RETRACTING_BRIDGE = 6
-    COMPLETED = 7
-
-
-class RobotController:
-    """Controller for autonomous solar panel cleaning robot"""
-    
-    def __init__(self, robot_id, environment):
-      
-        self.robot_id = robot_id
-        self.env = environment
-        
-        # State
-        self.state = RobotState.IDLE
-        self.current_panel = (0, 0)  # (row, col)
-        self.target_panel = None
-        
-        # Cleaning path
-        self.cleaning_path = self.plan_snake_path()
-        self.path_index = 0
-        
-        # Joint control
-        self.joint_indices = environment.joint_indices
-        
-        # Parameters
-        self.wheel_speed = 5.0  # rad/s - increased from 2.0
-        self.bridge_extension_speed = 0.1  # m/s
-        self.cleaning_time = 5.0  # seconds per panel - increased from 3.0
-        
-        print("Robot Controller Initialized")
-        print(f"Cleaning path: {len(self.cleaning_path)} panels")
-        
-    def plan_snake_path(self):
-        """Plan snake pattern through all panels"""
-        path = []
-        
-        for row in range(3):
-            if row % 2 == 0:
-                # Left to right
-                for col in range(4):
-                    path.append((row, col))
-            else:
-                # Right to left
-                for col in range(3, -1, -1):
-                    path.append((row, col))
-        
-        return path
-    
-    def set_wheel_velocity(self, left_vel, right_vel):
-        """
-        Set wheel velocities for 4-wheel drive
-        Front and rear wheels on each side move together
-        
-        Args:
-            left_vel: Left side wheels velocity (rad/s)
-            right_vel: Right side wheels velocity (rad/s)
-        """
-        # Get all 4 wheel joint indices
-        front_left = self.joint_indices.get('body_to_wheel_front_left', -1)
-        front_right = self.joint_indices.get('body_to_wheel_front_right', -1)
-        rear_left = self.joint_indices.get('body_to_wheel_rear_left', -1)
-        rear_right = self.joint_indices.get('body_to_wheel_rear_right', -1)
-        
-        # Control left side wheels
-        if front_left >= 0:
-            p.setJointMotorControl2(
-                self.robot_id, front_left,
-                p.VELOCITY_CONTROL,
-                targetVelocity=left_vel,
-                force=200.0
-            )
-        
-        if rear_left >= 0:
-            p.setJointMotorControl2(
-                self.robot_id, rear_left,
-                p.VELOCITY_CONTROL,
-                targetVelocity=left_vel,
-                force=200.0
-            )
-        
-        # Control right side wheels
-        if front_right >= 0:
-            p.setJointMotorControl2(
-                self.robot_id, front_right,
-                p.VELOCITY_CONTROL,
-                targetVelocity=right_vel,
-                force=200.0
-            )
-        
-        if rear_right >= 0:
-            p.setJointMotorControl2(
-                self.robot_id, rear_right,
-                p.VELOCITY_CONTROL,
-                targetVelocity=right_vel,
-                force=200.0
-            )
-    
-    def move_forward(self, speed=1.0):
-        """Move robot forward"""
-        vel = speed * self.wheel_speed
-        # REVERSED: Robot was going backward!
-        self.set_wheel_velocity(-vel, -vel)
-    
-    def move_backward(self, speed=1.0):
-        """Move robot backward"""
-        vel = speed * self.wheel_speed
-        # REVERSED: Now this goes backward
-        self.set_wheel_velocity(vel, vel)
-    
-    def rotate_left(self, speed=0.5):
-        """Rotate robot counterclockwise"""
-        vel = speed * self.wheel_speed
-        self.set_wheel_velocity(-vel, vel)
-    
-    def rotate_right(self, speed=0.5):
-        """Rotate robot clockwise"""
-        vel = speed * self.wheel_speed
-        self.set_wheel_velocity(vel, -vel)
-    
-    def stop(self):
-        """Stop all motion"""
-        self.set_wheel_velocity(0, 0)
-    
-    def set_bridge_position(self, segment, position):
-        """
-        Set bridge segment position
-        
-        Args:
-            segment: 1 or 2
-            position: Target position (0 to 0.5 meters)
-        """
-        joint_name = f'bridge_deploy_joint_{segment}'
-        joint_idx = self.joint_indices.get(joint_name, -1)
-        
-        if joint_idx >= 0:
-            p.setJointMotorControl2(
-                self.robot_id,
-                joint_idx,
-                p.POSITION_CONTROL,
-                targetPosition=position,
-                force=50.0,
-                maxVelocity=self.bridge_extension_speed
-            )
-    
-    def extend_bridge(self, length=0.5):
-        """
-        Extend bridge to specified length
-        
-        Args:
-            length: Total bridge length (0 to 1.0 meters)
-        """
-        print(f"Extending bridge to {length*100:.0f}cm...")
-        
-        # Extend segment 1
-        segment1_length = min(length, 0.5)
-        self.set_bridge_position(1, segment1_length)
-        
-        # Step simulation while extending
-        steps = int(3.0 * 240)  # 3 seconds at 240 Hz
-        for _ in range(steps):
-            self.env.step_simulation()
-            time.sleep(1./240.)
-        
-        # Extend segment 2 if needed
-        if length > 0.5:
-            segment2_length = min(length - 0.5, 0.5)
-            self.set_bridge_position(2, segment2_length)
-            
-            # Step simulation
-            for _ in range(steps):
-                self.env.step_simulation()
-                time.sleep(1./240.)
-        
-        print("Bridge extended")
-    
-    def set_rear_bridge_position(self, segment, position):
-        """
-        Set REAR bridge segment position
-        
-        Args:
-            segment: 1 or 2
-            position: Target position (0 to 0.5 meters)
-        """
-        joint_name = f'rear_bridge_deploy_joint_{segment}'
-        joint_idx = self.joint_indices.get(joint_name, -1)
-        
-        if joint_idx >= 0:
-            p.setJointMotorControl2(
-                self.robot_id,
-                joint_idx,
-                p.POSITION_CONTROL,
-                targetPosition=position,
-                force=50.0,
-                maxVelocity=self.bridge_extension_speed
-            )
-    
-    def extend_rear_bridge(self, length=0.5):
-        """
-        Extend REAR bridge to specified length
-        
-        Args:
-            length: Total rear bridge length (0 to 1.0 meters)
-        """
-        print(f"Extending REAR bridge to {length*100:.0f}cm...")
-        
-        # Extend segment 1
-        segment1_length = min(length, 0.5)
-        self.set_rear_bridge_position(1, segment1_length)
-        
-        # Step simulation while extending
-        steps = int(3.0 * 240)  # 3 seconds at 240 Hz
-        for _ in range(steps):
-            self.env.step_simulation()
-            time.sleep(1./240.)
-        
-        # Extend segment 2 if needed
-        if length > 0.5:
-            segment2_length = min(length - 0.5, 0.5)
-            self.set_rear_bridge_position(2, segment2_length)
-            
-            # Step simulation
-            for _ in range(steps):
-                self.env.step_simulation()
-                time.sleep(1./240.)
-        
-        print("Rear bridge extended")
-    
-    def retract_rear_bridge(self):
-        """Retract REAR bridge completely"""
-        print("Retracting rear bridge...")
-        self.set_rear_bridge_position(2, 0.0)
-        self.set_rear_bridge_position(1, 0.0)
-        
-        # Step simulation while retracting
-        steps = int(3.0 * 240)
-        for _ in range(steps):
-            self.env.step_simulation()
-            time.sleep(1./240.)
-        
-        print("Rear bridge retracted")
-    
-    def retract_bridge(self):
-        """Retract bridge back to storage"""
-        print("Retracting bridge...")
-        
-        # Retract segment 2 first
-        self.set_bridge_position(2, 0.0)
-        
-        # Step simulation
-        steps = int(3.0 * 240)
-        for _ in range(steps):
-            self.env.step_simulation()
-            time.sleep(1./240.)
-        
-        # Retract segment 1
-        self.set_bridge_position(1, 0.0)
-        
-        # Step simulation
-        for _ in range(steps):
-            self.env.step_simulation()
-            time.sleep(1./240.)
-        
-        print("Bridge retracted")
-    
-    def get_robot_position(self):
-        """Get robot's current position"""
-        pos, _ = p.getBasePositionAndOrientation(self.robot_id)
-        return pos
-    
-    def get_distance_to_target(self, target_pos):
-        """Calculate distance to target position"""
-        current_pos = self.get_robot_position()
-        dx = target_pos[0] - current_pos[0]
-        dy = target_pos[1] - current_pos[1]
-        return np.sqrt(dx*dx + dy*dy)
-    
-    def check_bridge_contact(self):
-        """
-        Check if bridge feet are in contact with surface
-        Simplified: Just returns True after extension
-        """
-        # In full implementation, would check contact points
-        return True
-    
-    def clean_current_panel(self):
-        """Execute cleaning action on current panel"""
-        print(f"Cleaning panel {self.current_panel}...")
-        
-        # Move forward while cleaning WITH SAFETY CHECKS
-        self.move_forward(0.5)
-        
-        # Step simulation while moving, checking for edges
-        steps = int(self.cleaning_time * 240)  # 240 Hz physics
-        for step in range(steps):
-            # Safety check every 60 steps (0.25 seconds)
-            if step % 60 == 0:
-                edge_detected, distance = self.check_edge_ahead()
-                if edge_detected:
-                    print(f"⚠️ Edge detected {distance:.2f}m ahead - stopping!")
-                    self.stop()
-                    break
-            
-            self.env.step_simulation()
-            time.sleep(1./240.)
-        
-        self.stop()
-        print(f"✓ Panel {self.current_panel} cleaned")
-    
-    def check_edge_ahead(self):
-        """
-        Simple edge detection using robot height
-        Returns: (edge_detected, distance)
-        """
-        pos, _ = p.getBasePositionAndOrientation(self.robot_id)
-        
-        # Cast ray downward from front of robot
-        ray_from = [pos[0] + 0.25, pos[1], pos[2]]  # 25cm ahead
-        ray_to = [pos[0] + 0.25, pos[1], pos[2] - 0.5]  # Down 50cm
-        
-        result = p.rayTest(ray_from, ray_to)
-        
-        if result:
-            hit_fraction = result[0][2]
-            distance_down = hit_fraction * 0.5
-            
-            # Edge if drop more than 10cm
-            if distance_down > 0.10:
-                return True, distance_down
-        
-        return False, 0.0
-    
-    def navigate_to_panel(self, target_panel):
-        """Navigate to target panel"""
-        current_pos = self.get_robot_position()
-        target_pos = self.env.panel_positions[target_panel]
-        
-        distance = self.get_distance_to_target(target_pos)
-        
-        print(f"Navigating to panel {target_panel} (distance: {distance:.2f}m)")
-        
-        # Check if gap crossing needed
-        current_row, current_col = self.current_panel
-        target_row, target_col = target_panel
-        
-        gap_detected = False
-        
-        # Row change = gap crossing needed
-        if target_row != current_row:
-            gap_detected = True
-            print("Gap detected - will use bridge")
-        
-        # Column change within same row = just move
-        elif target_col != current_col:
-            gap_detected = False
-            print("Moving along panel row")
-        
-        return gap_detected
-    
-    def execute_gap_crossing(self):
-        """
-        Execute LEGO-style gap crossing
-        Based on: https://www.youtube.com/watch?v=pwglOlD7e0M&t=152s
-        
-        KEY: Bridge stays extended until REAR wheels are on next panel!
-        
-        1. Extend bridge forward
-        2. Drive forward - rear wheels onto bridge
-        3. Keep driving - bridge slides under robot
-        4. WAIT until rear wheels on next panel
-        5. Then retract bridge
-        """
-        print("=== EXECUTING LEGO-STYLE GAP CROSSING ===")
-        
-        # 1. Approach gap edge slowly
-        print("1. Approaching gap edge...")
-        self.move_forward(0.3)
-        
-        steps = int(2.0 * 240)
-        for _ in range(steps):
-            self.env.step_simulation()
-            time.sleep(1./240.)
-        
-        self.stop()
-        
-        # Get starting position
-        start_pos = self.get_robot_position()
-        print(f"   Starting position: X={start_pos[0]:.2f}, Y={start_pos[1]:.2f}")
-        
-        # 2. Deploy bridge forward
-        print("2. Deploying bridge forward...")
-        self.extend_bridge(0.40)  # 40cm extension
-        
-        # 3. Verify bridge contact with next panel
-        print("3. Verifying bridge contact...")
-        
-        steps = int(2.0 * 240)
-        for _ in range(steps):
-            self.env.step_simulation()
-            time.sleep(1./240.)
-        
-        contact = self.check_bridge_contact()
-        
-        if not contact:
-            print("✗ Bridge contact failed - aborting")
-            self.retract_bridge()
-            return False
-        
-        print("✓ Bridge touching next panel")
-        
-        # 4. Calculate target distance
-        # FRONT of robot = where bridge is (crosses gap first)
-        # REAR of robot = opposite end (crosses gap last - these are the wheels we wait for!)
-        # 
-        # Robot length ≈ 0.40m (from front wheels to rear wheels: 0.30m)
-        # Gap = 0.15m
-        # Safety margin = 0.10m
-        # 
-        # Front wheels cross immediately (they're where the bridge is)
-        # Rear wheels need to travel: 0.30m (wheelbase) + 0.15m (gap) + 0.10m (margin) = 0.55m
-        target_distance = 0.60  # 60cm to ensure REAR wheels (opposite from bridge) are safely across
-        
-        print(f"4. Driving across gap (target: {target_distance*100:.0f}cm)...")
-        print("   Phase 1: Front wheels (with bridge) crossing...")
-        
-        self.move_forward(0.25)  # Moderate speed
-        
-        # Drive and monitor distance
-        distance_traveled = 0.0
-        step_count = 0
-        max_steps = int(15.0 * 240)  # 15 seconds max
-        
-        while step_count < max_steps and distance_traveled < target_distance:
-            self.env.step_simulation()
-            time.sleep(1./240.)
-            step_count += 1
-            
-            # Check distance every 60 steps (0.25 seconds)
-            if step_count % 60 == 0:
-                current_pos = self.get_robot_position()
-                distance_traveled = abs(current_pos[0] - start_pos[0])
-                
-                # Progress updates
-                if distance_traveled < 0.20:
-                    pass  # Front wheels still crossing
-                elif distance_traveled < 0.40:
-                    if step_count % 240 == 0:  # Every second
-                        print(f"   Phase 2: Front wheels across, rear wheels on bridge (traveled {distance_traveled*100:.0f}cm)")
-                elif distance_traveled < target_distance:
-                    if step_count % 240 == 0:
-                        print(f"   Phase 3: Bridge under robot, rear wheels crossing (traveled {distance_traveled*100:.0f}cm)")
-        
-        self.stop()
-        
-        final_pos = self.get_robot_position()
-        distance_traveled = abs(final_pos[0] - start_pos[0])
-        
-        print(f"✓ Crossing complete! Traveled {distance_traveled*100:.0f}cm")
-        print(f"   Final position: X={final_pos[0]:.2f}, Y={final_pos[1]:.2f}")
-        
-        # Verify REAR wheels (the ones without bridge) are on solid ground
-        print("5. Verifying REAR wheels on panel...")
-        
-        steps = int(1.0 * 240)  # 1 second to settle
-        for _ in range(steps):
-            self.env.step_simulation()
-            time.sleep(1./240.)
-        
-        print("✓ All wheels safely on next panel!")
-        
-        # 6. NOW retract bridge (rear wheels are safe!)
-        print("6. Retracting bridge...")
-        self.retract_bridge()
-        
-        print("=== GAP CROSSING COMPLETE ===")
-        return True
-    
-    def update(self):
-        """Update controller - called each simulation step"""
-        
-        if self.state == RobotState.IDLE:
-            # Start cleaning mission
-            print("\n=== STARTING AUTONOMOUS CLEANING ===")
-            self.state = RobotState.SCANNING
-            
-        elif self.state == RobotState.SCANNING:
-            # Scan current panel (simplified - just check if it exists)
-            print(f"\nScanning panel {self.current_panel}...")
-            
-            steps = int(1.0 * 240)
-            for _ in range(steps):
-                self.env.step_simulation()
-                time.sleep(1./240.)
-            
-            self.state = RobotState.CLEANING
-            
-        elif self.state == RobotState.CLEANING:
-            # Clean current panel
-            self.clean_current_panel()
-            
-            # Get next panel
-            self.path_index += 1
-            if self.path_index >= len(self.cleaning_path):
-                self.state = RobotState.COMPLETED
-                return
-            
-            self.target_panel = self.cleaning_path[self.path_index]
-            self.state = RobotState.APPROACHING_GAP
-            
-        elif self.state == RobotState.APPROACHING_GAP:
-            # Navigate to next panel
-            gap_detected = self.navigate_to_panel(self.target_panel)
-            
-            if gap_detected:
-                # Gap crossing - deploy bridge
-                self.state = RobotState.DEPLOYING_BRIDGE
-            else:
-                # No gap - LOCK bridge fully retracted
-                print("No gap - retracting and locking bridge...")
-                self.set_bridge_position(1, 0.0)
-                self.set_bridge_position(2, 0.0)
-                
-                # Wait longer for full retraction
-                steps = int(1.0 * 240)
-                for _ in range(steps):
-                    self.env.step_simulation()
-                    time.sleep(1./240.)
-                
-                # Verify bridge is retracted by checking joint positions
-                seg1_pos = p.getJointState(self.robot_id, self.joint_indices.get('bridge_deploy_joint_1', -1))[0]
-                seg2_pos = p.getJointState(self.robot_id, self.joint_indices.get('bridge_deploy_joint_2', -1))[0]
-                
-                print(f"Bridge positions: seg1={seg1_pos:.3f}m, seg2={seg2_pos:.3f}m")
-                
-                if abs(seg1_pos) > 0.01 or abs(seg2_pos) > 0.01:
-                    print("⚠️ Bridge not fully retracted! Forcing retraction...")
-                    # Force retract with high effort
-                    for _ in range(3):
-                        self.set_bridge_position(1, 0.0)
-                        self.set_bridge_position(2, 0.0)
-                        for _ in range(int(0.5 * 240)):
-                            self.env.step_simulation()
-                            time.sleep(1./240.)
-                
-                print("✓ Bridge confirmed retracted - safe to move")
-                
-                # Now move to next panel
-                self.move_forward(0.5)
-                
-                steps = int(5.0 * 240)  # 5 seconds movement
-                for step in range(steps):
-                    # Safety check every 60 steps
-                    if step % 60 == 0:
-                        edge_detected, distance = self.check_edge_ahead()
-                        if edge_detected:
-                            print(f"⚠️ Edge detected during navigation - stopping!")
-                            self.stop()
-                            # Stay at current panel
-                            print(f"Remaining at panel {self.current_panel}")
-                            self.state = RobotState.SCANNING
-                            return
-                    
-                    self.env.step_simulation()
-                    time.sleep(1./240.)
-                
-                self.stop()
-                self.current_panel = self.target_panel
-                self.state = RobotState.SCANNING
-            
-        elif self.state == RobotState.DEPLOYING_BRIDGE:
-            # Execute gap crossing
-            success = self.execute_gap_crossing()
-            
-            if success:
-                self.current_panel = self.target_panel
-                self.state = RobotState.SCANNING
-            else:
-                print("Gap crossing failed - stopping")
-                self.state = RobotState.COMPLETED
-                
-        elif self.state == RobotState.COMPLETED:
-            # Mission complete
-            print("\n=== ALL PANELS CLEANED ===")
-            print(f"Total panels cleaned: {self.path_index}")
-            self.stop()
-            return True  # Signal completion
-        
-        return False  # Not yet completed
-    
-    def run_autonomous(self, max_steps=10000):
-        """
-        Run autonomous cleaning mission
-        
-        Args:
-            max_steps: Maximum simulation steps
-        """
-        print("\n" + "="*50)
-        print("AUTONOMOUS CLEANING MISSION")
-        print("="*50)
-        
-        step_count = 0
-        
-        while step_count < max_steps:
-            # Update controller
-            completed = self.update()
-            
-            if completed:
-                break
-            
-            # Step simulation
-            self.env.step_simulation()
-            time.sleep(1./240.)
-            
-            step_count += 1
-            
-            # Progress update every 1000 steps
-            if step_count % 1000 == 0:
-                print(f"Steps: {step_count}, State: {self.state.name}")
-        
-        print("\nMission ended")
-        print(f"Total steps: {step_count}")
+WHEEL_SPEED = 5.0  # rad/s
+WHEEL_FORCE = 300.0  # N
+BRUSH_SPEED = 12.0  # rad/s
+BRUSH_FORCE = 5.0
+BRIDGE_FORCE = 200.0
+BRIDGE_VEL = 0.20  # m/s
+SUCTION_FORCE = 120.0
+SUCTION_VEL = 0.08
+LIFT_FORCE = 300.0
+LIFT_VEL = 0.05
+LIFT_STEP = 0.005  # m per key press
 
 
 class ManualController:
-    """Manual keyboard control for testing"""
-    
-    def __init__(self, robot_id, environment):
-        """Initialize manual controller"""
+
+    def __init__(self, robot_id, env):
         self.robot_id = robot_id
-        self.env = environment
-        self.joint_indices = environment.joint_indices
-        
-        self.wheel_speed = 5.0  # Increased from 2.0 to match autonomous
-        self.bridge_pos = [0.0, 0.0]  # Segment 1, Segment 2
-        
-        print("\nManual Controller Ready")
-        self.print_instructions()
-    
-    def print_instructions(self):
-        """Print control instructions"""
-        print("\n" + "="*50)
-        print("MANUAL CONTROL KEYS")
-        print("="*50)
-        print("Arrow Keys:")
-        print("  ↑ - Forward")
-        print("  ↓ - Backward")
-        print("  ← - Rotate Left")
-        print("  → - Rotate Right")
-        print("\nBridge Control:")
-        print("  1 - Extend segment 1")
-        print("  2 - Extend segment 2")
-        print("  0 - Retract all")
-        print("\nPress 'q' to quit")
-        print("="*50 + "\n")
-    
-    def set_wheel_velocity(self, left_vel, right_vel):
-        """Set wheel velocities for 4-wheel drive"""
-        # Get all 4 wheel joint indices
-        front_left = self.joint_indices.get('body_to_wheel_front_left', -1)
-        front_right = self.joint_indices.get('body_to_wheel_front_right', -1)
-        rear_left = self.joint_indices.get('body_to_wheel_rear_left', -1)
-        rear_right = self.joint_indices.get('body_to_wheel_rear_right', -1)
-        
-        # Control left side wheels
-        if front_left >= 0:
+        self.env = env
+        self.joints = env.joint_indices
+
+        self.brush_on = False
+        self.front_bridge = [0.0, 0.0]
+        self.rear_bridge = [0.0, 0.0]
+        self.front_legs_down = False
+        self.rear_legs_down = False
+        self.lift_pos = 0.0  # metres
+
+        print(__doc__)
+        print(f"  Panel tilt : {env.panel_tilt_deg:.1f}°")
+        print()
+
+    def _set_wheels(self, left: float, right: float):
+        """
+        Apply velocity to all four wheels.
+        left  → FL + RL joints
+        right → FR + RR joints
+        Positive = robot moves FORWARD (+X). No sign inversion.
+        """
+        pairs = [
+            ("wheel_fl_joint", left),
+            ("wheel_rl_joint", left),
+            ("wheel_fr_joint", right),
+            ("wheel_rr_joint", right),
+        ]
+        for jname, vel in pairs:
+            idx = self.joints.get(jname, -1)
+            if idx >= 0:
+                p.setJointMotorControl2(
+                    self.robot_id,
+                    idx,
+                    p.VELOCITY_CONTROL,
+                    targetVelocity=float(vel),
+                    force=WHEEL_FORCE,
+                )
+
+    def _stop_wheels(self):
+        self._set_wheels(0.0, 0.0)
+
+    def _set_brush(self, on: bool):
+        idx = self.joints.get("brush_joint", -1)
+        if idx >= 0:
             p.setJointMotorControl2(
-                self.robot_id, front_left,
+                self.robot_id,
+                idx,
                 p.VELOCITY_CONTROL,
-                targetVelocity=left_vel,
-                force=200.0
+                targetVelocity=BRUSH_SPEED if on else 0.0,
+                force=BRUSH_FORCE,
             )
-        
-        if rear_left >= 0:
+
+    def _set_bridge(self, side: str, seg: int, pos: float):
+        """side = 'front' | 'rear',  seg = 1 | 2"""
+        jname = f"{side}_bridge_extend{seg}"
+        upper = 0.40 if seg == 1 else 0.30
+        idx = self.joints.get(jname, -1)
+        if idx >= 0:
             p.setJointMotorControl2(
-                self.robot_id, rear_left,
-                p.VELOCITY_CONTROL,
-                targetVelocity=left_vel,
-                force=200.0
-            )
-        
-        # Control right side wheels
-        if front_right >= 0:
-            p.setJointMotorControl2(
-                self.robot_id, front_right,
-                p.VELOCITY_CONTROL,
-                targetVelocity=right_vel,
-                force=200.0
-            )
-        
-        if rear_right >= 0:
-            p.setJointMotorControl2(
-                self.robot_id, rear_right,
-                p.VELOCITY_CONTROL,
-                targetVelocity=right_vel,
-                force=200.0
-            )
-    
-    def set_bridge_position(self, segment, position):
-        """Set bridge position"""
-        joint_name = f'bridge_deploy_joint_{segment}'
-        joint_idx = self.joint_indices.get(joint_name, -1)
-        
-        if joint_idx >= 0:
-            p.setJointMotorControl2(
-                self.robot_id, joint_idx,
+                self.robot_id,
+                idx,
                 p.POSITION_CONTROL,
-                targetPosition=position,
-                force=50.0
+                targetPosition=float(np.clip(pos, 0.0, upper)),
+                force=BRIDGE_FORCE,
+                maxVelocity=BRIDGE_VEL,
             )
-    
-    def handle_key(self, key):
-        
-        if key == p.B3G_UP_ARROW:
-            # Forward (REVERSED - negative velocity moves forward)
-            self.set_wheel_velocity(-self.wheel_speed, -self.wheel_speed)
-            
-        elif key == p.B3G_DOWN_ARROW:
-            # Backward (REVERSED - positive velocity moves backward)
-            self.set_wheel_velocity(self.wheel_speed, self.wheel_speed)
-            
-        elif key == p.B3G_LEFT_ARROW:
-            # Rotate left
-            self.set_wheel_velocity(self.wheel_speed, -self.wheel_speed)
-            
-        elif key == p.B3G_RIGHT_ARROW:
-            # Rotate right
-            self.set_wheel_velocity(-self.wheel_speed, self.wheel_speed)
-            
-        elif key == ord('1'):
-            # Extend segment 1
-            self.bridge_pos[0] = min(self.bridge_pos[0] + 0.1, 0.5)
-            self.set_bridge_position(1, self.bridge_pos[0])
-            print(f"Bridge segment 1: {self.bridge_pos[0]*100:.0f}cm")
-            
-        elif key == ord('2'):
-            # Extend segment 2
-            self.bridge_pos[1] = min(self.bridge_pos[1] + 0.1, 0.5)
-            self.set_bridge_position(2, self.bridge_pos[1])
-            print(f"Bridge segment 2: {self.bridge_pos[1]*100:.0f}cm")
-            
-        elif key == ord('0'):
-            # Retract all
-            self.bridge_pos = [0.0, 0.0]
-            self.set_bridge_position(1, 0.0)
-            self.set_bridge_position(2, 0.0)
-            print("Bridge retracted")
-            
-        elif key == ord('q'):
+        else:
+            print(f"  [WARN] joint not found: {jname}")
+
+    def _set_suction_pair(self, side: str, pos: float):
+        for which in ("left", "right"):
+            jname = f"{side}_suction_{which}_joint"
+            idx = self.joints.get(jname, -1)
+            if idx >= 0:
+                p.setJointMotorControl2(
+                    self.robot_id,
+                    idx,
+                    p.POSITION_CONTROL,
+                    targetPosition=float(np.clip(pos, 0.0, 0.050)),
+                    force=SUCTION_FORCE,
+                    maxVelocity=SUCTION_VEL,
+                )
+
+    def _set_lift(self, pos: float):
+        idx = self.joints.get("body_lift_joint", -1)
+        if idx >= 0:
+            p.setJointMotorControl2(
+                self.robot_id,
+                idx,
+                p.POSITION_CONTROL,
+                targetPosition=float(np.clip(pos, 0.0, 0.050)),
+                force=LIFT_FORCE,
+                maxVelocity=LIFT_VEL,
+            )
+
+    def _print_status(self):
+        pos, _ = p.getBasePositionAndOrientation(self.robot_id)
+        row, col = self.env.nearest_panel()
+        cleaned = len(self.env.cleaned_set)
+        total = len(self.env.panel_ids)
+        print(f"\n  ── Status ─────────────────────────────")
+        print(f"  Robot pos   : ({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f})")
+        print(
+            f"  Nearest panel: ({row},{col})  "
+            f"{'✓ cleaned' if (row,col) in self.env.cleaned_set else 'dirty'}"
+        )
+        print(f"  Cleaned     : {cleaned}/{total}")
+        print(f"  Brush       : {'ON' if self.brush_on else 'off'}")
+        print(f"  Body lift   : {self.lift_pos*1000:.0f} mm")
+        print(
+            f"  Front bridge: {self.front_bridge[0]*100:.0f} / "
+            f"{self.front_bridge[1]*100:.0f} cm"
+        )
+        print(
+            f"  Rear  bridge: {self.rear_bridge[0]*100:.0f} / "
+            f"{self.rear_bridge[1]*100:.0f} cm"
+        )
+        print(f"  Front legs  : {'DOWN' if self.front_legs_down else 'up'}")
+        print(f"  Rear  legs  : {'DOWN' if self.rear_legs_down else 'up'}")
+        print(f"  ───────────────────────────────────────\n")
+
+    # ── key handler ─────────────────────────────────────────
+    def _handle_key(self, key: int) -> bool:
+        v = WHEEL_SPEED
+
+        if key in (p.B3G_UP_ARROW, ord("w"), ord("W")):
+            self._set_wheels(v, v)
+
+        elif key in (p.B3G_DOWN_ARROW, ord("s"), ord("S")):
+            self._set_wheels(-v, -v)
+
+        elif key in (p.B3G_LEFT_ARROW, ord("a"), ord("A")):
+            self._set_wheels(-v, v)
+
+        elif key in (p.B3G_RIGHT_ARROW, ord("d"), ord("D")):
+            self._set_wheels(v, -v)
+
+        elif key in (ord("b"), ord("B")):
+            self.brush_on = not self.brush_on
+            self._set_brush(self.brush_on)
+            if self.brush_on:
+                print("  Brush ON  - drive over panel to sweep, then press C")
+            else:
+                print("  Brush OFF")
+
+        elif key in (ord("c"), ord("C")):
+            row, col = self.env.nearest_panel()
+            if (row, col) in self.env.cleaned_set:
+                print(f"  Panel ({row},{col}) already clean")
+            else:
+                if not self.brush_on:
+                    self._set_brush(True)
+                    for _ in range(int(0.5 * 240)):
+                        self.env.step()
+                        time.sleep(1.0 / 240.0)
+                    self._set_brush(False)
+                self.env.clean_panel(row, col)
+
+        elif key == ord("1"):
+            self.front_bridge[0] = min(self.front_bridge[0] + 0.10, 0.40)
+            self._set_bridge("front", 1, self.front_bridge[0])
+            print(f"  Front bridge seg1 - {self.front_bridge[0]*100:.0f} cm")
+
+        elif key == ord("2"):
+            self.front_bridge[1] = min(self.front_bridge[1] + 0.10, 0.30)
+            self._set_bridge("front", 2, self.front_bridge[1])
+            print(f"  Front bridge seg2 - {self.front_bridge[1]*100:.0f} cm")
+
+        elif key == ord("0"):
+            self.front_bridge = [0.0, 0.0]
+            self._set_bridge("front", 2, 0.0)
+            self._set_bridge("front", 1, 0.0)
+            print("  Front bridge retracted")
+
+        elif key == ord("3"):
+            self.rear_bridge[0] = min(self.rear_bridge[0] + 0.10, 0.40)
+            self._set_bridge("rear", 1, self.rear_bridge[0])
+            print(f"  Rear bridge seg1 - {self.rear_bridge[0]*100:.0f} cm")
+
+        elif key == ord("4"):
+            self.rear_bridge[1] = min(self.rear_bridge[1] + 0.10, 0.30)
+            self._set_bridge("rear", 2, self.rear_bridge[1])
+            print(f"  Rear bridge seg2 - {self.rear_bridge[1]*100:.0f} cm")
+
+        elif key == ord("9"):
+            self.rear_bridge = [0.0, 0.0]
+            self._set_bridge("rear", 2, 0.0)
+            self._set_bridge("rear", 1, 0.0)
+            print("  Rear bridge retracted")
+
+        elif key in (ord("f"), ord("F")):
+            self.front_legs_down = not self.front_legs_down
+            self._set_suction_pair("front", 0.045 if self.front_legs_down else 0.0)
+            print(f"  Front legs {'▼ DOWN' if self.front_legs_down else '▲ UP'}")
+
+        elif key in (ord("r"), ord("R")):
+            self.rear_legs_down = not self.rear_legs_down
+            self._set_suction_pair("rear", 0.045 if self.rear_legs_down else 0.0)
+            print(f"  Rear legs {'▼ DOWN' if self.rear_legs_down else '▲ UP'}")
+
+        elif key in (ord("l"), ord("L")):
+            self.lift_pos = min(self.lift_pos + LIFT_STEP, 0.050)
+            self._set_lift(self.lift_pos)
+            print(f"  Body lift ▲ {self.lift_pos*1000:.0f} mm")
+
+        elif key in (ord("k"), ord("K")):
+            self.lift_pos = max(self.lift_pos - LIFT_STEP, 0.0)
+            self._set_lift(self.lift_pos)
+            print(f"  Body lift ▼ {self.lift_pos*1000:.0f} mm")
+
+        elif key in (ord("p"), ord("P")):
+            self._print_status()
+
+        elif key in (ord("q"), ord("Q"), 27):  # 27 = Esc
+            print("  Quitting …")
             return False
-        
+
         return True
-    
+
     def run(self):
-        """Run manual control loop"""
-        
-        print("Manual control active. Use arrow keys and numbers.")
-        
+        print("Manual control active.\n")
+
+        MOVE_KEYS = {
+            p.B3G_UP_ARROW,
+            p.B3G_DOWN_ARROW,
+            p.B3G_LEFT_ARROW,
+            p.B3G_RIGHT_ARROW,
+            ord("w"),
+            ord("W"),
+            ord("s"),
+            ord("S"),
+            ord("a"),
+            ord("A"),
+            ord("d"),
+            ord("D"),
+        }
+
         try:
             while True:
                 keys = p.getKeyboardEvents()
-                
-                if not keys:
-                    self.set_wheel_velocity(0, 0)
 
-                for key in keys:
-                    if keys[key] & p.KEY_IS_DOWN:
-                        if not self.handle_key(key):
+                any_move = any(
+                    (k in MOVE_KEYS) and (state & p.KEY_IS_DOWN)
+                    for k, state in keys.items()
+                )
+                if not any_move:
+                    self._stop_wheels()
+
+                for key, state in keys.items():
+                    if state & p.KEY_IS_DOWN:
+                        if not self._handle_key(key):
+                            self._stop_wheels()
                             return
-                
-                self.env.step_simulation()
-                time.sleep(1./240.)
-                
+
+                # Step physics + suction for inclined panels
+                self.env.step()
+                if self.env.panel_tilt_deg > 0:
+                    self.env.apply_suction(force_n=120.0)
+                time.sleep(1.0 / 240.0)
+
         except KeyboardInterrupt:
-            print("\nManual control ended")
+            print("\n  Stopped.")
+            self._stop_wheels()
