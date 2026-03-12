@@ -130,7 +130,7 @@ class ManualController:
                 self.robot_id,
                 idx,
                 p.POSITION_CONTROL,
-                targetPosition=float(np.clip(pos,-.95, .95)),
+                targetPosition=float(np.clip(pos, -0.95, 0.95)),
                 force=BRIDGE_FORCE,
                 maxVelocity=BRIDGE_VEL,
             )
@@ -156,7 +156,7 @@ class ManualController:
                 self.robot_id,
                 idx,
                 p.POSITION_CONTROL,
-                targetPosition=float(np.clip(pos, -.1, 0)),
+                targetPosition=float(np.clip(pos, -0.1, 0)),
                 force=LIFT_FORCE,
                 maxVelocity=LIFT_VEL,
             )
@@ -240,8 +240,8 @@ class ManualController:
             print(f"  Front bridge seg1 - {self.bridge*100:.0f} cm")
 
         elif key in (ord("l"), ord("L")):
-            self.lift_pos = max(self.lift_pos - LIFT_STEP, -.1)
-            self._set_lift(-.1)
+            self.lift_pos = max(self.lift_pos - LIFT_STEP, -0.1)
+            self._set_lift(-0.1)
             print(f"  Body lift ▲ {self.lift_pos*1000:.0f} mm")
 
         elif key in (ord("k"), ord("K")):
@@ -293,8 +293,18 @@ class ManualController:
                             self._stop_wheels()
                             return
 
-                # Step physics + suction for inclined panels
                 self.env.step()
+
+                is_gap, dist = self.env.detect_gap(range_m=0.2)
+
+                if is_gap:
+                    print(
+                        f"⚠️[LIDAR REPORT] GAP DETECTED ahead! No panel within {dist:.2f}m."
+                    )
+                else:
+                    # This prints the current clearance distance to the panel
+                    print(f"[LIDAR STATUS] Surface OK. Distance to panel: {dist:.3f}m")
+
                 if self.env.panel_tilt_deg > 0:
                     self.env.apply_suction(force_n=120.0)
                 time.sleep(1.0 / 240.0)
