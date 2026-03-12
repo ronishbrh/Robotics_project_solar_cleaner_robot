@@ -35,22 +35,13 @@ Cleaning:
                Tip: spin brush (B), sweep the panel (↑↓),
                then press C to remove dirt visuals.
 
-Front bridge (press repeatedly to extend 10 cm at a time):
-  1            Front seg1  +10 cm  (max 40 cm)
-  2            Front seg2  +10 cm  (max 30 cm)
-  0            Retract front bridge fully
-
-Rear bridge:
-  3            Rear seg1  +10 cm  (max 40 cm)
-  4            Rear seg2  +10 cm  (max 30 cm)
-  9            Retract rear bridge fully
-
-Suction legs (bridge tip pads):
-  F            Toggle FRONT tip suction pads DOWN / UP
-  R            Toggle REAR  tip suction pads DOWN / UP
+Bridge:
+  1            Front +10 cm  (max 32 cm)
+  2            Back -10 cm  (max 32 cm)
+  0            Retract bridge to middle
 
 Body lift (for gap crossing):
-  L            Lift body +5 mm  (max 50 mm)
+  L            Lift body +5 mm  (max 100 mm)
   K            Lower body −5 mm
 
 Info:
@@ -74,7 +65,7 @@ SUCTION_FORCE = 120.0
 SUCTION_VEL = 0.08
 LIFT_FORCE = 300.0
 LIFT_VEL = 0.05
-LIFT_STEP = 0.005  # m per key press
+LIFT_STEP = 0.1  # m per key press
 
 
 class ManualController:
@@ -85,8 +76,7 @@ class ManualController:
         self.joints = env.joint_indices
 
         self.brush_on = False
-        self.front_bridge = [0.0, 0.0]
-        self.rear_bridge = [0.0, 0.0]
+        self.bridge = 0.0
         self.front_legs_down = False
         self.rear_legs_down = False
         self.lift_pos = 0.0  # metres
@@ -133,22 +123,17 @@ class ManualController:
                 force=BRUSH_FORCE,
             )
 
-    def _set_bridge(self, side: str, seg: int, pos: float):
-        """side = 'front' | 'rear',  seg = 1 | 2"""
-        jname = f"{side}_bridge_extend{seg}"
-        upper = 0.40 if seg == 1 else 0.30
-        idx = self.joints.get(jname, -1)
+    def _set_bridge(self, pos: float):
+        idx = self.joints.get("bridge_mount", -1)
         if idx >= 0:
             p.setJointMotorControl2(
                 self.robot_id,
                 idx,
                 p.POSITION_CONTROL,
-                targetPosition=float(np.clip(pos, 0.0, upper)),
+                targetPosition=float(np.clip(pos,-.95, .95)),
                 force=BRIDGE_FORCE,
                 maxVelocity=BRIDGE_VEL,
             )
-        else:
-            print(f"  [WARN] joint not found: {jname}")
 
     def _set_suction_pair(self, side: str, pos: float):
         for which in ("left", "right"):
@@ -165,13 +150,13 @@ class ManualController:
                 )
 
     def _set_lift(self, pos: float):
-        idx = self.joints.get("body_lift_joint", -1)
+        idx = self.joints.get("lift_column_joint", -1)
         if idx >= 0:
             p.setJointMotorControl2(
                 self.robot_id,
                 idx,
                 p.POSITION_CONTROL,
-                targetPosition=float(np.clip(pos, 0.0, 0.050)),
+                targetPosition=float(np.clip(pos, -.1, 0)),
                 force=LIFT_FORCE,
                 maxVelocity=LIFT_VEL,
             )
@@ -240,54 +225,27 @@ class ManualController:
                 self.env.clean_panel(row, col)
 
         elif key == ord("1"):
-            self.front_bridge[0] = min(self.front_bridge[0] + 0.10, 0.40)
-            self._set_bridge("front", 1, self.front_bridge[0])
-            print(f"  Front bridge seg1 - {self.front_bridge[0]*100:.0f} cm")
+            self.bridge = min(self.bridge + 0.10, 0.32)
+            self._set_bridge(self.bridge)
+            print(f"  Front bridge seg1 - {self.bridge*100:.0f} cm")
 
         elif key == ord("2"):
-            self.front_bridge[1] = min(self.front_bridge[1] + 0.10, 0.30)
-            self._set_bridge("front", 2, self.front_bridge[1])
-            print(f"  Front bridge seg2 - {self.front_bridge[1]*100:.0f} cm")
+            self.bridge = max(self.bridge - 0.10, -0.32)
+            self._set_bridge(self.bridge)
+            print(f"  Front bridge seg1 - {self.bridge*100:.0f} cm")
 
         elif key == ord("0"):
-            self.front_bridge = [0.0, 0.0]
-            self._set_bridge("front", 2, 0.0)
-            self._set_bridge("front", 1, 0.0)
-            print("  Front bridge retracted")
-
-        elif key == ord("3"):
-            self.rear_bridge[0] = min(self.rear_bridge[0] + 0.10, 0.40)
-            self._set_bridge("rear", 1, self.rear_bridge[0])
-            print(f"  Rear bridge seg1 - {self.rear_bridge[0]*100:.0f} cm")
-
-        elif key == ord("4"):
-            self.rear_bridge[1] = min(self.rear_bridge[1] + 0.10, 0.30)
-            self._set_bridge("rear", 2, self.rear_bridge[1])
-            print(f"  Rear bridge seg2 - {self.rear_bridge[1]*100:.0f} cm")
-
-        elif key == ord("9"):
-            self.rear_bridge = [0.0, 0.0]
-            self._set_bridge("rear", 2, 0.0)
-            self._set_bridge("rear", 1, 0.0)
-            print("  Rear bridge retracted")
-
-        elif key in (ord("f"), ord("F")):
-            self.front_legs_down = not self.front_legs_down
-            self._set_suction_pair("front", 0.045 if self.front_legs_down else 0.0)
-            print(f"  Front legs {'▼ DOWN' if self.front_legs_down else '▲ UP'}")
-
-        elif key in (ord("r"), ord("R")):
-            self.rear_legs_down = not self.rear_legs_down
-            self._set_suction_pair("rear", 0.045 if self.rear_legs_down else 0.0)
-            print(f"  Rear legs {'▼ DOWN' if self.rear_legs_down else '▲ UP'}")
+            self.bridge = 0
+            self._set_bridge(self.bridge)
+            print(f"  Front bridge seg1 - {self.bridge*100:.0f} cm")
 
         elif key in (ord("l"), ord("L")):
-            self.lift_pos = min(self.lift_pos + LIFT_STEP, 0.050)
-            self._set_lift(self.lift_pos)
+            self.lift_pos = max(self.lift_pos - LIFT_STEP, -.1)
+            self._set_lift(-.1)
             print(f"  Body lift ▲ {self.lift_pos*1000:.0f} mm")
 
         elif key in (ord("k"), ord("K")):
-            self.lift_pos = max(self.lift_pos - LIFT_STEP, 0.0)
+            self.lift_pos = min(self.lift_pos + LIFT_STEP, 0)
             self._set_lift(self.lift_pos)
             print(f"  Body lift ▼ {self.lift_pos*1000:.0f} mm")
 

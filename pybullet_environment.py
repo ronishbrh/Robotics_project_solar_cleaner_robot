@@ -6,9 +6,7 @@ No autonomous logic here.
 
 import pybullet as p
 import pybullet_data
-import numpy as np
 import math
-import time
 import os
 
 
@@ -26,8 +24,8 @@ class SolarPanelEnvironment:
     PANEL_LENGTH = 1.60  # metres along X (robot drives in X direction)
     PANEL_WIDTH = 1.00  # metres along Y
     PANEL_THICKNESS = 0.05
-    PANEL_GAP = 0.15  # gap between rows (X)
-    PANEL_COL_GAP = 0.15  # gap between columns (Y)
+    PANEL_GAP = 0.10  # gap between rows (X)
+    PANEL_COL_GAP = 0.10  # gap between columns (Y)
 
     def __init__(self, gui=True, urdf_path=None, panel_tilt_deg=0.0):
         self.physics_client = p.connect(p.GUI if gui else p.DIRECT)
@@ -147,27 +145,26 @@ class SolarPanelEnvironment:
             tstr = {0: "revolute", 1: "prismatic", 4: "fixed"}.get(jtype, "?")
             print(f"  [{i:2d}] {name:<42} ({tstr})")
 
-        for i in range(nj):
-            jtype = p.getJointInfo(self.robot_id, i)[2]
-            if jtype in (0, 1):  # revolute or prismatic
-                p.setJointMotorControl2(
-                    self.robot_id, i, p.VELOCITY_CONTROL, targetVelocity=0.0, force=0.0
-                )
+        # for i in range(nj):
+        #     jtype = p.getJointInfo(self.robot_id, i)[2]
+        #     if jtype in (0, 1):  # revolute or prismatic
+        #         p.setJointMotorControl2(
+        #             self.robot_id, i, p.VELOCITY_CONTROL, targetVelocity=0.0, force=0.0
+        #         )
 
-        for name, idx in self.joint_indices.items():
-            if p.getJointInfo(self.robot_id, idx)[2] == 1:
-                p.resetJointState(self.robot_id, idx, 0.0)
+        # for name, idx in self.joint_indices.items():
+        #     if p.getJointInfo(self.robot_id, idx)[2] == 1:
+        #         p.resetJointState(self.robot_id, idx, 0.0)
 
-        lift_idx = self.joint_indices.get("body_lift_joint", -1)
-        if lift_idx >= 0:
-            p.resetJointState(self.robot_id, lift_idx, 0.0)
-            # VELOCITY_CONTROL targeting 0 = pure Z damper only
+        idx = self.joint_indices.get("lift_column_joint", -1)
+        if idx >= 0:
             p.setJointMotorControl2(
                 self.robot_id,
-                lift_idx,
-                p.VELOCITY_CONTROL,
-                targetVelocity=0.0,
-                force=60.0,
+                idx,
+                p.POSITION_CONTROL,
+                targetPosition=0,
+                force=300,
+                maxVelocity=0.1,
             )
 
         for name in (
