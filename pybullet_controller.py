@@ -80,6 +80,8 @@ class ManualController:
         self.front_legs_down = False
         self.rear_legs_down = False
         self.lift_pos = 0.0  # metres
+        self.suction_at_base_on = True
+        self.suction_at_pads_on = False
 
         print(__doc__)
         print(f"  Panel tilt : {env.panel_tilt_deg:.1f}°")
@@ -149,6 +151,92 @@ class ManualController:
                     maxVelocity=SUCTION_VEL,
                 )
 
+    def apply_suction_on_base(self, force_n=120.0):
+        """
+        Push robot into panel surface by applying an external force
+        along -panel_normal.  Call once per simulation step.
+        Only active when robot is close to the panel surface.
+        Force is reduced to 0 automatically if robot lifts off.
+        """
+        if self.robot_id is None:
+            return
+
+        pos, _ = p.getBasePositionAndOrientation(self.robot_id)
+
+        # Ray from wheel level toward panel surface
+        d = [
+            -self.env.panel_normal[0],
+            -self.env.panel_normal[1],
+            -self.env.panel_normal[2],
+        ]  # into panel
+        # start 0.08m below robot base (near wheel bottom)
+        rf = [pos[0] + d[0] * 0.08, pos[1] + d[1] * 0.08, pos[2] + d[2] * 0.08]
+        # end 0.06m further down
+        rt = [rf[0] + d[0] * 0.085, rf[1] + d[1] * 0.085, rf[2] + d[2] * 0.085]
+
+        res = p.rayTest(rf, rt)
+        if not res:
+            return
+        hit_body, _, hit_frac, _, _ = res[0]
+        # Ignore self-hits and misses
+        if hit_body == self.robot_id or hit_body == -1:
+            return
+
+        # Scale: full force when touching, zero at 0.02m gap
+        gap = hit_frac * 0.085
+        max_gap = 0.085
+        if gap > max_gap:
+            return
+        scale = 1.0 - gap / max_gap
+        # fvec = [d[0] * force_n * scale, d[1] * force_n * scale, d[2] * force_n * scale]
+        fvec = [0, 0, -force_n * scale]
+        p.applyExternalForce(self.robot_id, -1, fvec, [0,0,0], p.LINK_FRAME)
+        print("Force at base")
+
+    def apply_suction_on_legs(self, force_n=30.0):
+        if self.robot_id is None:
+            return
+
+        # Ray from wheel level toward panel surface
+        d = [
+            -self.env.panel_normal[0],
+            -self.env.panel_normal[1],
+            -self.env.panel_normal[2],
+        ]  # into panel
+
+        for cup_link in self.env.cup_links:
+            state = p.getLinkState(self.robot_id, cup_link)
+            cup_pos = state[0]
+
+            very_small = 0.005
+            # start 0.08m below robot base (near wheel bottom)
+            rf = [cup_pos[0] + d[0] * very_small, cup_pos[1] + d[1] * very_small, cup_pos[2] + d[2] * very_small]
+            # end 0.06m further down
+            rt = [rf[0] + d[0] * 0.03, rf[1] + d[1] * 0.03, rf[2] + d[2] * 0.03]
+
+            res = p.rayTest(rf, rt)
+
+            if not res:
+                return
+            print("Hit something", res[0][0], [item['id'] for item in self.env.panel_ids])
+
+            hit_body, _, hit_frac, _, _ = res[0]
+
+            if hit_body in [item['id'] for item in self.env.panel_ids]:
+                gap = hit_frac * 0.03
+                max_gap = 0.020
+                if gap > max_gap:
+                    return
+                scale = 1.0 - gap / max_gap
+                # fvec = [d[0] * force_n * scale, d[1] * force_n * scale, d[2] * force_n * scale]
+                # p.applyExternalForce(self.robot_id, cup_link, fvec, cup_pos, p.WORLD_FRAME)
+                fvec = [0, 0, -force_n * scale]
+                p.applyExternalForce(self.robot_id, cup_link, fvec, [0,0,0], p.LINK_FRAME)
+                print("Applying suction at pad: ", cup_link, "at panel: ", hit_body)
+            
+
+
+
     def _set_lift(self, pos: float):
         idx = self.joints.get("lift_column_joint", -1)
         if idx >= 0:
@@ -188,7 +276,7 @@ class ManualController:
         print(f"  ───────────────────────────────────────\n")
 
     # ── key handler ─────────────────────────────────────────
-    def _handle_key(self, key: int) -> bool:
+    def _handle_key(self, key: int, state) -> bool:
         v = WHEEL_SPEED
 
         if key in (p.B3G_UP_ARROW, ord("w"), ord("W")):
@@ -203,7 +291,7 @@ class ManualController:
         elif key in (p.B3G_RIGHT_ARROW, ord("d"), ord("D")):
             self._set_wheels(v, -v)
 
-        elif key in (ord("b"), ord("B")):
+        elif key in (ord("b"), ord("B")) and p.KEY_WAS_TRIGGERED:
             self.brush_on = not self.brush_on
             self._set_brush(self.brush_on)
             if self.brush_on:
@@ -211,7 +299,7 @@ class ManualController:
             else:
                 print("  Brush OFF")
 
-        elif key in (ord("c"), ord("C")):
+        elif key in (ord("c"), ord("C")) and p.KEY_WAS_TRIGGERED:
             row, col = self.env.nearest_panel()
             if (row, col) in self.env.cleaned_set:
                 print(f"  Panel ({row},{col}) already clean")
@@ -224,32 +312,40 @@ class ManualController:
                     self._set_brush(False)
                 self.env.clean_panel(row, col)
 
-        elif key == ord("1"):
+        elif key == ord("1") and p.KEY_WAS_TRIGGERED:
             self.bridge = min(self.bridge + 0.10, 0.32)
             self._set_bridge(self.bridge)
             print(f"  Front bridge seg1 - {self.bridge*100:.0f} cm")
 
-        elif key == ord("2"):
+        elif key == ord("2") and p.KEY_WAS_TRIGGERED:
             self.bridge = max(self.bridge - 0.10, -0.32)
             self._set_bridge(self.bridge)
             print(f"  Front bridge seg1 - {self.bridge*100:.0f} cm")
 
-        elif key == ord("0"):
+        elif key == ord("0") and state & p.KEY_WAS_TRIGGERED:
             self.bridge = 0
             self._set_bridge(self.bridge)
             print(f"  Front bridge seg1 - {self.bridge*100:.0f} cm")
 
-        elif key in (ord("l"), ord("L")):
+        elif key == ord("3") and state & p.KEY_WAS_TRIGGERED:
+            self.suction_at_base_on = not self.suction_at_base_on
+            print("Suction at base = ", self.suction_at_base_on)
+
+        elif key == ord("4") and state & p.KEY_WAS_TRIGGERED:
+            self.suction_at_pads_on = not self.suction_at_pads_on
+            print("Suction at pads = ", self.suction_at_pads_on)
+
+        elif key in (ord("l"), ord("L")) and state & p.KEY_WAS_TRIGGERED:
             self.lift_pos = max(self.lift_pos - LIFT_STEP, -.1)
             self._set_lift(-.1)
             print(f"  Body lift ▲ {self.lift_pos*1000:.0f} mm")
 
-        elif key in (ord("k"), ord("K")):
+        elif key in (ord("k"), ord("K")) and state & p.KEY_WAS_TRIGGERED:
             self.lift_pos = min(self.lift_pos + LIFT_STEP, 0)
             self._set_lift(self.lift_pos)
             print(f"  Body lift ▼ {self.lift_pos*1000:.0f} mm")
 
-        elif key in (ord("p"), ord("P")):
+        elif key in (ord("p"), ord("P")) and state & p.KEY_WAS_TRIGGERED:
             self._print_status()
 
         elif key in (ord("q"), ord("Q"), 27):  # 27 = Esc
@@ -289,14 +385,17 @@ class ManualController:
 
                 for key, state in keys.items():
                     if state & p.KEY_IS_DOWN:
-                        if not self._handle_key(key):
+                        if not self._handle_key(key, state):
                             self._stop_wheels()
                             return
 
                 # Step physics + suction for inclined panels
                 self.env.step()
-                if self.env.panel_tilt_deg > 0:
-                    self.env.apply_suction(force_n=120.0)
+                if self.suction_at_base_on:
+                    self.apply_suction_on_base(force_n=320.0)
+
+                if self.suction_at_pads_on:
+                    self.apply_suction_on_legs(force_n=100)
                 time.sleep(1.0 / 240.0)
 
         except KeyboardInterrupt:

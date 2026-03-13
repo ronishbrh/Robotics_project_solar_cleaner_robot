@@ -32,12 +32,15 @@ class SolarPanelEnvironment:
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, -9.81)
 
+        p.setPhysicsEngineParameter(numSolverIterations=150)
+
         self.panel_tilt_deg = float(panel_tilt_deg)
         self.panel_ids = []  # list of dicts
         self.dirt_map = {}  # (row,col) -> [body_id, ...]
         self.cleaned_set = set()
         self.joint_indices = {}
         self.robot_id = None
+        self.cup_links = []
 
         # Ground plane
         p.loadURDF("plane.urdf")
@@ -124,7 +127,7 @@ class SolarPanelEnvironment:
         p0 = self.panel_ids[0]["pos"]
 
         # Spawn robot above panel (0,0), aligned to panel slope
-        spawn = [p0[0], col0_y, p0[2] + 0.22]
+        spawn = [p0[0] + 0.40 * math.cos(tilt), col0_y, p0[2] + 0.40 * math.sin(tilt) + 0.16]
         orn = p.getQuaternionFromEuler([0, -tilt, 0])
 
         self.robot_id = p.loadURDF(
@@ -144,6 +147,7 @@ class SolarPanelEnvironment:
             self.joint_indices[name] = i
             tstr = {0: "revolute", 1: "prismatic", 4: "fixed"}.get(jtype, "?")
             print(f"  [{i:2d}] {name:<42} ({tstr})")
+
 
         # for i in range(nj):
         #     jtype = p.getJointInfo(self.robot_id, i)[2]
@@ -191,19 +195,33 @@ class SolarPanelEnvironment:
                 self.robot_id, idx, p.VELOCITY_CONTROL, targetVelocity=0.0, force=0.0
             )
 
+        cup_names = [ "front_left_pad", "front_right_pad", "rear_left_pad", "rear_right_pad"]
         for i in range(nj):
             lname = p.getJointInfo(self.robot_id, i)[12].decode()
+
             if lname.startswith("wheel_"):
                 p.changeDynamics(
                     self.robot_id,
                     i,
-                    lateralFriction=1.5,
-                    rollingFriction=0.01,
+                    lateralFriction=0.4,
+                    rollingFriction=0.02,
                     spinningFriction=0.01,
                 )
 
-        for _ in range(400):
-            p.stepSimulation()
+            if lname in cup_names:
+                print("Found cup")
+                self.cup_links.append(i)
+                p.changeDynamics(
+                    self.robot_id,
+                    i,
+                    lateralFriction=0.4,
+                    spinningFriction=0.05,
+                    rollingFriction=0.01,
+                )
+
+
+        #for _ in range(400):
+        #    p.stepSimulation()
 
         pos, _ = p.getBasePositionAndOrientation(self.robot_id)
         ncon = len(p.getContactPoints(self.robot_id))
@@ -252,45 +270,6 @@ class SolarPanelEnvironment:
             f"[ENV] Panel ({row},{col}) cleaned " f"[{len(self.cleaned_set)}/{total}]"
         )
 
-    def apply_suction(self, force_n=120.0):
-        """
-        Push robot into panel surface by applying an external force
-        along -panel_normal.  Call once per simulation step.
-        Only active when robot is close to the panel surface.
-        Force is reduced to 0 automatically if robot lifts off.
-        """
-        if self.robot_id is None:
-            return
-
-        pos, _ = p.getBasePositionAndOrientation(self.robot_id)
-
-        # Ray from wheel level toward panel surface
-        d = [
-            -self.panel_normal[0],
-            -self.panel_normal[1],
-            -self.panel_normal[2],
-        ]  # into panel
-        # start 0.08m below robot base (near wheel bottom)
-        rf = [pos[0] + d[0] * 0.08, pos[1] + d[1] * 0.08, pos[2] + d[2] * 0.08]
-        # end 0.06m further down
-        rt = [rf[0] + d[0] * 0.06, rf[1] + d[1] * 0.06, rf[2] + d[2] * 0.06]
-
-        res = p.rayTest(rf, rt)
-        if not res:
-            return
-        hit_body, _, hit_frac, _, _ = res[0]
-        # Ignore self-hits and misses
-        if hit_body == self.robot_id or hit_body == -1:
-            return
-
-        # Scale: full force when touching, zero at 0.02m gap
-        gap = hit_frac * 0.06
-        max_gap = 0.020
-        if gap > max_gap:
-            return
-        scale = 1.0 - gap / max_gap
-        fvec = [d[0] * force_n * scale, d[1] * force_n * scale, d[2] * force_n * scale]
-        p.applyExternalForce(self.robot_id, -1, fvec, list(pos), p.WORLD_FRAME)
 
     def nearest_panel(self):
 
