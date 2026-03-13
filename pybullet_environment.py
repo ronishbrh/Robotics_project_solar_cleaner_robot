@@ -185,7 +185,7 @@ class SolarPanelEnvironment:
             p.changeDynamics(
                 self.robot_id,
                 idx,
-                lateralFriction=1.5,
+                lateralFriction=0.4,
                 linearDamping=0.0,
                 angularDamping=0.0,
                 jointDamping=0.0,
@@ -204,8 +204,8 @@ class SolarPanelEnvironment:
                     self.robot_id,
                     i,
                     lateralFriction=0.4,
-                    rollingFriction=0.02,
-                    spinningFriction=0.01,
+                    rollingFriction=0.002,
+                    spinningFriction=0.001,
                 )
 
             if lname in cup_names:

@@ -55,8 +55,8 @@ import numpy as np
 import time
 
 
-WHEEL_SPEED = 5.0  # rad/s
-WHEEL_FORCE = 300.0  # N
+WHEEL_SPEED = 16.0  # rad/s
+WHEEL_FORCE = 800.0  # N
 BRUSH_SPEED = 12.0  # rad/s
 BRUSH_FORCE = 5.0
 BRIDGE_FORCE = 200.0
