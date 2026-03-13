@@ -9,7 +9,6 @@ Usage:
 
 import sys
 import os
-import time
 
 from pybullet_environment import SolarPanelEnvironment
 from pybullet_controller import ManualController

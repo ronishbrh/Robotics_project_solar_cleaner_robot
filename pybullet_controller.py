@@ -35,22 +35,13 @@ Cleaning:
                Tip: spin brush (B), sweep the panel (↑↓),
                then press C to remove dirt visuals.
 
-Front bridge (press repeatedly to extend 10 cm at a time):
-  1            Front seg1  +10 cm  (max 40 cm)
-  2            Front seg2  +10 cm  (max 30 cm)
-  0            Retract front bridge fully
-
-Rear bridge:
-  3            Rear seg1  +10 cm  (max 40 cm)
-  4            Rear seg2  +10 cm  (max 30 cm)
-  9            Retract rear bridge fully
-
-Suction legs (bridge tip pads):
-  F            Toggle FRONT tip suction pads DOWN / UP
-  R            Toggle REAR  tip suction pads DOWN / UP
+Bridge:
+  1            Front +10 cm  (max 32 cm)
+  2            Back -10 cm  (max 32 cm)
+  0            Retract bridge to middle
 
 Body lift (for gap crossing):
-  L            Lift body +5 mm  (max 50 mm)
+  L            Lift body +5 mm  (max 100 mm)
   K            Lower body −5 mm
 
 Info:
@@ -64,8 +55,8 @@ import numpy as np
 import time
 
 
-WHEEL_SPEED = 5.0  # rad/s
-WHEEL_FORCE = 300.0  # N
+WHEEL_SPEED = 16.0  # rad/s
+WHEEL_FORCE = 800.0  # N
 BRUSH_SPEED = 12.0  # rad/s
 BRUSH_FORCE = 5.0
 BRIDGE_FORCE = 200.0
@@ -74,7 +65,7 @@ SUCTION_FORCE = 120.0
 SUCTION_VEL = 0.08
 LIFT_FORCE = 300.0
 LIFT_VEL = 0.05
-LIFT_STEP = 0.005  # m per key press
+LIFT_STEP = 0.1  # m per key press
 
 
 class ManualController:
@@ -85,11 +76,12 @@ class ManualController:
         self.joints = env.joint_indices
 
         self.brush_on = False
-        self.front_bridge = [0.0, 0.0]
-        self.rear_bridge = [0.0, 0.0]
+        self.bridge = 0.0
         self.front_legs_down = False
         self.rear_legs_down = False
         self.lift_pos = 0.0  # metres
+        self.suction_at_base_on = True
+        self.suction_at_pads_on = False
 
         print(__doc__)
         print(f"  Panel tilt : {env.panel_tilt_deg:.1f}°")
@@ -133,22 +125,17 @@ class ManualController:
                 force=BRUSH_FORCE,
             )
 
-    def _set_bridge(self, side: str, seg: int, pos: float):
-        """side = 'front' | 'rear',  seg = 1 | 2"""
-        jname = f"{side}_bridge_extend{seg}"
-        upper = 0.40 if seg == 1 else 0.30
-        idx = self.joints.get(jname, -1)
+    def _set_bridge(self, pos: float):
+        idx = self.joints.get("bridge_mount", -1)
         if idx >= 0:
             p.setJointMotorControl2(
                 self.robot_id,
                 idx,
                 p.POSITION_CONTROL,
-                targetPosition=float(np.clip(pos, 0.0, upper)),
+                targetPosition=float(np.clip(pos, -0.95, 0.95)),
                 force=BRIDGE_FORCE,
                 maxVelocity=BRIDGE_VEL,
             )
-        else:
-            print(f"  [WARN] joint not found: {jname}")
 
     def _set_suction_pair(self, side: str, pos: float):
         for which in ("left", "right"):
@@ -164,14 +151,100 @@ class ManualController:
                     maxVelocity=SUCTION_VEL,
                 )
 
+    def apply_suction_on_base(self, force_n=120.0):
+        """
+        Push robot into panel surface by applying an external force
+        along -panel_normal.  Call once per simulation step.
+        Only active when robot is close to the panel surface.
+        Force is reduced to 0 automatically if robot lifts off.
+        """
+        if self.robot_id is None:
+            return
+
+        pos, _ = p.getBasePositionAndOrientation(self.robot_id)
+
+        # Ray from wheel level toward panel surface
+        d = [
+            -self.env.panel_normal[0],
+            -self.env.panel_normal[1],
+            -self.env.panel_normal[2],
+        ]  # into panel
+        # start 0.08m below robot base (near wheel bottom)
+        rf = [pos[0] + d[0] * 0.08, pos[1] + d[1] * 0.08, pos[2] + d[2] * 0.08]
+        # end 0.06m further down
+        rt = [rf[0] + d[0] * 0.085, rf[1] + d[1] * 0.085, rf[2] + d[2] * 0.085]
+
+        res = p.rayTest(rf, rt)
+        if not res:
+            return
+        hit_body, _, hit_frac, _, _ = res[0]
+        # Ignore self-hits and misses
+        if hit_body == self.robot_id or hit_body == -1:
+            return
+
+        # Scale: full force when touching, zero at 0.02m gap
+        gap = hit_frac * 0.085
+        max_gap = 0.085
+        if gap > max_gap:
+            return
+        scale = 1.0 - gap / max_gap
+        # fvec = [d[0] * force_n * scale, d[1] * force_n * scale, d[2] * force_n * scale]
+        fvec = [0, 0, -force_n * scale]
+        p.applyExternalForce(self.robot_id, -1, fvec, [0,0,0], p.LINK_FRAME)
+        print("Force at base")
+
+    def apply_suction_on_legs(self, force_n=30.0):
+        if self.robot_id is None:
+            return
+
+        # Ray from wheel level toward panel surface
+        d = [
+            -self.env.panel_normal[0],
+            -self.env.panel_normal[1],
+            -self.env.panel_normal[2],
+        ]  # into panel
+
+        for cup_link in self.env.cup_links:
+            state = p.getLinkState(self.robot_id, cup_link)
+            cup_pos = state[0]
+
+            very_small = 0.005
+            # start 0.08m below robot base (near wheel bottom)
+            rf = [cup_pos[0] + d[0] * very_small, cup_pos[1] + d[1] * very_small, cup_pos[2] + d[2] * very_small]
+            # end 0.06m further down
+            rt = [rf[0] + d[0] * 0.03, rf[1] + d[1] * 0.03, rf[2] + d[2] * 0.03]
+
+            res = p.rayTest(rf, rt)
+
+            if not res:
+                return
+            print("Hit something", res[0][0], [item['id'] for item in self.env.panel_ids])
+
+            hit_body, _, hit_frac, _, _ = res[0]
+
+            if hit_body in [item['id'] for item in self.env.panel_ids]:
+                gap = hit_frac * 0.03
+                max_gap = 0.020
+                if gap > max_gap:
+                    return
+                scale = 1.0 - gap / max_gap
+                # fvec = [d[0] * force_n * scale, d[1] * force_n * scale, d[2] * force_n * scale]
+                # p.applyExternalForce(self.robot_id, cup_link, fvec, cup_pos, p.WORLD_FRAME)
+                fvec = [0, 0, -force_n * scale]
+                p.applyExternalForce(self.robot_id, cup_link, fvec, [0,0,0], p.LINK_FRAME)
+                print("Applying suction at pad: ", cup_link, "at panel: ", hit_body)
+            
+
+
+
     def _set_lift(self, pos: float):
-        idx = self.joints.get("body_lift_joint", -1)
+        idx = self.joints.get("lift_column_joint", -1)
         if idx >= 0:
             p.setJointMotorControl2(
                 self.robot_id,
                 idx,
                 p.POSITION_CONTROL,
-                targetPosition=float(np.clip(pos, 0.0, 0.050)),
+                targetPosition=float(np.clip(pos, -0.1, 0)),
                 force=LIFT_FORCE,
                 maxVelocity=LIFT_VEL,
             )
@@ -181,7 +254,7 @@ class ManualController:
         row, col = self.env.nearest_panel()
         cleaned = len(self.env.cleaned_set)
         total = len(self.env.panel_ids)
-        print(f"\n  ── Status ─────────────────────────────")
+        print("\n  ── Status ─────────────────────────────")
         print(f"  Robot pos   : ({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f})")
         print(
             f"  Nearest panel: ({row},{col})  "
@@ -200,10 +273,10 @@ class ManualController:
         )
         print(f"  Front legs  : {'DOWN' if self.front_legs_down else 'up'}")
         print(f"  Rear  legs  : {'DOWN' if self.rear_legs_down else 'up'}")
-        print(f"  ───────────────────────────────────────\n")
+        print("  ───────────────────────────────────────\n")
 
     # ── key handler ─────────────────────────────────────────
-    def _handle_key(self, key: int) -> bool:
+    def _handle_key(self, key: int, state) -> bool:
         v = WHEEL_SPEED
 
         if key in (p.B3G_UP_ARROW, ord("w"), ord("W")):
@@ -218,7 +291,7 @@ class ManualController:
         elif key in (p.B3G_RIGHT_ARROW, ord("d"), ord("D")):
             self._set_wheels(v, -v)
 
-        elif key in (ord("b"), ord("B")):
+        elif key in (ord("b"), ord("B")) and p.KEY_WAS_TRIGGERED:
             self.brush_on = not self.brush_on
             self._set_brush(self.brush_on)
             if self.brush_on:
@@ -226,7 +299,7 @@ class ManualController:
             else:
                 print("  Brush OFF")
 
-        elif key in (ord("c"), ord("C")):
+        elif key in (ord("c"), ord("C")) and p.KEY_WAS_TRIGGERED:
             row, col = self.env.nearest_panel()
             if (row, col) in self.env.cleaned_set:
                 print(f"  Panel ({row},{col}) already clean")
@@ -239,59 +312,40 @@ class ManualController:
                     self._set_brush(False)
                 self.env.clean_panel(row, col)
 
-        elif key == ord("1"):
-            self.front_bridge[0] = min(self.front_bridge[0] + 0.10, 0.40)
-            self._set_bridge("front", 1, self.front_bridge[0])
-            print(f"  Front bridge seg1 - {self.front_bridge[0]*100:.0f} cm")
+        elif key == ord("1") and p.KEY_WAS_TRIGGERED:
+            self.bridge = min(self.bridge + 0.10, 0.32)
+            self._set_bridge(self.bridge)
+            print(f"  Front bridge seg1 - {self.bridge*100:.0f} cm")
 
-        elif key == ord("2"):
-            self.front_bridge[1] = min(self.front_bridge[1] + 0.10, 0.30)
-            self._set_bridge("front", 2, self.front_bridge[1])
-            print(f"  Front bridge seg2 - {self.front_bridge[1]*100:.0f} cm")
+        elif key == ord("2") and p.KEY_WAS_TRIGGERED:
+            self.bridge = max(self.bridge - 0.10, -0.32)
+            self._set_bridge(self.bridge)
+            print(f"  Front bridge seg1 - {self.bridge*100:.0f} cm")
 
-        elif key == ord("0"):
-            self.front_bridge = [0.0, 0.0]
-            self._set_bridge("front", 2, 0.0)
-            self._set_bridge("front", 1, 0.0)
-            print("  Front bridge retracted")
+        elif key == ord("0") and state & p.KEY_WAS_TRIGGERED:
+            self.bridge = 0
+            self._set_bridge(self.bridge)
+            print(f"  Front bridge seg1 - {self.bridge*100:.0f} cm")
 
-        elif key == ord("3"):
-            self.rear_bridge[0] = min(self.rear_bridge[0] + 0.10, 0.40)
-            self._set_bridge("rear", 1, self.rear_bridge[0])
-            print(f"  Rear bridge seg1 - {self.rear_bridge[0]*100:.0f} cm")
+        elif key == ord("3") and state & p.KEY_WAS_TRIGGERED:
+            self.suction_at_base_on = not self.suction_at_base_on
+            print("Suction at base = ", self.suction_at_base_on)
 
-        elif key == ord("4"):
-            self.rear_bridge[1] = min(self.rear_bridge[1] + 0.10, 0.30)
-            self._set_bridge("rear", 2, self.rear_bridge[1])
-            print(f"  Rear bridge seg2 - {self.rear_bridge[1]*100:.0f} cm")
+        elif key == ord("4") and state & p.KEY_WAS_TRIGGERED:
+            self.suction_at_pads_on = not self.suction_at_pads_on
+            print("Suction at pads = ", self.suction_at_pads_on)
 
-        elif key == ord("9"):
-            self.rear_bridge = [0.0, 0.0]
-            self._set_bridge("rear", 2, 0.0)
-            self._set_bridge("rear", 1, 0.0)
-            print("  Rear bridge retracted")
-
-        elif key in (ord("f"), ord("F")):
-            self.front_legs_down = not self.front_legs_down
-            self._set_suction_pair("front", 0.045 if self.front_legs_down else 0.0)
-            print(f"  Front legs {'▼ DOWN' if self.front_legs_down else '▲ UP'}")
-
-        elif key in (ord("r"), ord("R")):
-            self.rear_legs_down = not self.rear_legs_down
-            self._set_suction_pair("rear", 0.045 if self.rear_legs_down else 0.0)
-            print(f"  Rear legs {'▼ DOWN' if self.rear_legs_down else '▲ UP'}")
-
-        elif key in (ord("l"), ord("L")):
-            self.lift_pos = min(self.lift_pos + LIFT_STEP, 0.050)
-            self._set_lift(self.lift_pos)
+        elif key in (ord("l"), ord("L")) and state & p.KEY_WAS_TRIGGERED:
+            self.lift_pos = max(self.lift_pos - LIFT_STEP, -.1)
+            self._set_lift(-.1)
             print(f"  Body lift ▲ {self.lift_pos*1000:.0f} mm")
 
-        elif key in (ord("k"), ord("K")):
-            self.lift_pos = max(self.lift_pos - LIFT_STEP, 0.0)
+        elif key in (ord("k"), ord("K")) and state & p.KEY_WAS_TRIGGERED:
+            self.lift_pos = min(self.lift_pos + LIFT_STEP, 0)
             self._set_lift(self.lift_pos)
             print(f"  Body lift ▼ {self.lift_pos*1000:.0f} mm")
 
-        elif key in (ord("p"), ord("P")):
+        elif key in (ord("p"), ord("P")) and state & p.KEY_WAS_TRIGGERED:
             self._print_status()
 
         elif key in (ord("q"), ord("Q"), 27):  # 27 = Esc
@@ -331,14 +385,28 @@ class ManualController:
 
                 for key, state in keys.items():
                     if state & p.KEY_IS_DOWN:
-                        if not self._handle_key(key):
+                        if not self._handle_key(key, state):
                             self._stop_wheels()
                             return
 
-                # Step physics + suction for inclined panels
                 self.env.step()
-                if self.env.panel_tilt_deg > 0:
-                    self.env.apply_suction(force_n=120.0)
+
+                if self.suction_at_base_on:
+                    self.apply_suction_on_base(force_n=320.0)
+
+                if self.suction_at_pads_on:
+                    self.apply_suction_on_legs(force_n=100)
+
+                is_gap, dist = self.env.detect_gap(range_m=0.2)
+
+                if is_gap:
+                    print(
+                        f"⚠️[LIDAR REPORT] GAP DETECTED ahead! No panel within {dist:.2f}m."
+                    )
+                else:
+                    # This prints the current clearance distance to the panel
+                    print(f"[LIDAR STATUS] Surface OK. Distance to panel: {dist:.3f}m")
+
                 time.sleep(1.0 / 240.0)
 
         except KeyboardInterrupt:

@@ -6,9 +6,7 @@ No autonomous logic here.
 
 import pybullet as p
 import pybullet_data
-import numpy as np
 import math
-import time
 import os
 
 
@@ -26,13 +24,15 @@ class SolarPanelEnvironment:
     PANEL_LENGTH = 1.60  # metres along X (robot drives in X direction)
     PANEL_WIDTH = 1.00  # metres along Y
     PANEL_THICKNESS = 0.05
-    PANEL_GAP = 0.15  # gap between rows (X)
-    PANEL_COL_GAP = 0.15  # gap between columns (Y)
+    PANEL_GAP = 0.10  # gap between rows (X)
+    PANEL_COL_GAP = 0.10  # gap between columns (Y)
 
     def __init__(self, gui=True, urdf_path=None, panel_tilt_deg=0.0):
         self.physics_client = p.connect(p.GUI if gui else p.DIRECT)
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, -9.81)
+
+        p.setPhysicsEngineParameter(numSolverIterations=150)
 
         self.panel_tilt_deg = float(panel_tilt_deg)
         self.panel_ids = []  # list of dicts
@@ -40,6 +40,7 @@ class SolarPanelEnvironment:
         self.cleaned_set = set()
         self.joint_indices = {}
         self.robot_id = None
+        self.cup_links = []
 
         # Ground plane
         p.loadURDF("plane.urdf")
@@ -126,7 +127,7 @@ class SolarPanelEnvironment:
         p0 = self.panel_ids[0]["pos"]
 
         # Spawn robot above panel (0,0), aligned to panel slope
-        spawn = [p0[0], col0_y, p0[2] + 0.22]
+        spawn = [p0[0] + 0.40 * math.cos(tilt), col0_y, p0[2] + 0.40 * math.sin(tilt) + 0.16]
         orn = p.getQuaternionFromEuler([0, -tilt, 0])
 
         self.robot_id = p.loadURDF(
@@ -147,27 +148,27 @@ class SolarPanelEnvironment:
             tstr = {0: "revolute", 1: "prismatic", 4: "fixed"}.get(jtype, "?")
             print(f"  [{i:2d}] {name:<42} ({tstr})")
 
-        for i in range(nj):
-            jtype = p.getJointInfo(self.robot_id, i)[2]
-            if jtype in (0, 1):  # revolute or prismatic
-                p.setJointMotorControl2(
-                    self.robot_id, i, p.VELOCITY_CONTROL, targetVelocity=0.0, force=0.0
-                )
 
-        for name, idx in self.joint_indices.items():
-            if p.getJointInfo(self.robot_id, idx)[2] == 1:
-                p.resetJointState(self.robot_id, idx, 0.0)
+        # for i in range(nj):
+        #     jtype = p.getJointInfo(self.robot_id, i)[2]
+        #     if jtype in (0, 1):  # revolute or prismatic
+        #         p.setJointMotorControl2(
+        #             self.robot_id, i, p.VELOCITY_CONTROL, targetVelocity=0.0, force=0.0
+        #         )
 
-        lift_idx = self.joint_indices.get("body_lift_joint", -1)
-        if lift_idx >= 0:
-            p.resetJointState(self.robot_id, lift_idx, 0.0)
-            # VELOCITY_CONTROL targeting 0 = pure Z damper only
+        # for name, idx in self.joint_indices.items():
+        #     if p.getJointInfo(self.robot_id, idx)[2] == 1:
+        #         p.resetJointState(self.robot_id, idx, 0.0)
+
+        idx = self.joint_indices.get("lift_column_joint", -1)
+        if idx >= 0:
             p.setJointMotorControl2(
                 self.robot_id,
-                lift_idx,
-                p.VELOCITY_CONTROL,
-                targetVelocity=0.0,
-                force=60.0,
+                idx,
+                p.POSITION_CONTROL,
+                targetPosition=0,
+                force=300,
+                maxVelocity=0.1,
             )
 
         for name in (
@@ -184,7 +185,7 @@ class SolarPanelEnvironment:
             p.changeDynamics(
                 self.robot_id,
                 idx,
-                lateralFriction=1.5,
+                lateralFriction=0.4,
                 linearDamping=0.0,
                 angularDamping=0.0,
                 jointDamping=0.0,
@@ -194,19 +195,33 @@ class SolarPanelEnvironment:
                 self.robot_id, idx, p.VELOCITY_CONTROL, targetVelocity=0.0, force=0.0
             )
 
+        cup_names = [ "front_left_pad", "front_right_pad", "rear_left_pad", "rear_right_pad"]
         for i in range(nj):
             lname = p.getJointInfo(self.robot_id, i)[12].decode()
+
             if lname.startswith("wheel_"):
                 p.changeDynamics(
                     self.robot_id,
                     i,
-                    lateralFriction=1.5,
-                    rollingFriction=0.01,
-                    spinningFriction=0.01,
+                    lateralFriction=0.4,
+                    rollingFriction=0.002,
+                    spinningFriction=0.001,
                 )
 
-        for _ in range(400):
-            p.stepSimulation()
+            if lname in cup_names:
+                print("Found cup")
+                self.cup_links.append(i)
+                p.changeDynamics(
+                    self.robot_id,
+                    i,
+                    lateralFriction=0.4,
+                    spinningFriction=0.05,
+                    rollingFriction=0.01,
+                )
+
+
+        #for _ in range(400):
+        #    p.stepSimulation()
 
         pos, _ = p.getBasePositionAndOrientation(self.robot_id)
         ncon = len(p.getContactPoints(self.robot_id))
@@ -255,45 +270,51 @@ class SolarPanelEnvironment:
             f"[ENV] Panel ({row},{col}) cleaned " f"[{len(self.cleaned_set)}/{total}]"
         )
 
-    def apply_suction(self, force_n=120.0):
-        """
-        Push robot into panel surface by applying an external force
-        along -panel_normal.  Call once per simulation step.
-        Only active when robot is close to the panel surface.
-        Force is reduced to 0 automatically if robot lifts off.
-        """
-        if self.robot_id is None:
-            return
 
-        pos, _ = p.getBasePositionAndOrientation(self.robot_id)
+    def detect_gap(self, range_m=0.3):
+        # 1. Find the lidar link index (usually 1 or 2 in your URDF)
+        # You can search for it by name once in __init__ or just use the index.
+        lidar_link_name = "lidar"
+        lidar_index = -1
+        for i in range(p.getNumJoints(self.robot_id)):
+            if p.getJointInfo(self.robot_id, i)[12].decode("utf-8") == lidar_link_name:
+                lidar_index = i
+                break
 
-        # Ray from wheel level toward panel surface
-        d = [
-            -self.panel_normal[0],
-            -self.panel_normal[1],
-            -self.panel_normal[2],
-        ]  # into panel
-        # start 0.08m below robot base (near wheel bottom)
-        rf = [pos[0] + d[0] * 0.08, pos[1] + d[1] * 0.08, pos[2] + d[2] * 0.08]
-        # end 0.06m further down
-        rt = [rf[0] + d[0] * 0.06, rf[1] + d[1] * 0.06, rf[2] + d[2] * 0.06]
+        # 2. Get current world position and orientation of the LiDAR link
+        link_state = p.getLinkState(self.robot_id, lidar_index)
+        lidar_pos = link_state[0]  # (x, y, z)
+        lidar_ori = link_state[1]  # (x, y, z, w)
 
-        res = p.rayTest(rf, rt)
-        if not res:
-            return
-        hit_body, _, hit_frac, _, _ = res[0]
-        # Ignore self-hits and misses
-        if hit_body == self.robot_id or hit_body == -1:
-            return
+        # 3. Calculate "Perpendicular Downward" relative to the LiDAR/Robot
+        rot_mat = p.getMatrixFromQuaternion(lidar_ori)
+        # In your URDF, the lidar is a cylinder standing up, so local Z is "Up"
+        # Indices 2, 5, 8 represent the local Z-axis (Up vector)
+        up_vec = [rot_mat[2], rot_mat[5], rot_mat[8]]
 
-        # Scale: full force when touching, zero at 0.02m gap
-        gap = hit_frac * 0.06
-        max_gap = 0.020
-        if gap > max_gap:
-            return
-        scale = 1.0 - gap / max_gap
-        fvec = [d[0] * force_n * scale, d[1] * force_n * scale, d[2] * force_n * scale]
-        p.applyExternalForce(self.robot_id, -1, fvec, list(pos), p.WORLD_FRAME)
+        # Ray starts at LiDAR position
+        ray_start = lidar_pos
+
+        # Ray ends range_m distance "Down" (negative Up vector)
+        ray_end = [
+            ray_start[0] - up_vec[0] * range_m,
+            ray_start[1] - up_vec[1] * range_m,
+            ray_start[2] - up_vec[2] * range_m,
+        ]
+
+        # 4. Cast Ray
+        result = p.rayTest(ray_start, ray_end)
+        hit_body = result[0][0]
+        hit_fraction = result[0][2]
+
+        # Visual feedback: Red line for gap, Green for panel
+        color = [1, 0, 0] if hit_body == -1 else [0, 1, 0]
+        p.addUserDebugLine(ray_start, ray_end, color, lifeTime=0.05)
+
+        if hit_body == -1:
+            return True, range_m  # Gap detected
+        else:
+            return False, hit_fraction * range_m  # Panel detected
 
     def nearest_panel(self):
 
