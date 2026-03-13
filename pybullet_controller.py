@@ -132,7 +132,7 @@ class ManualController:
                 self.robot_id,
                 idx,
                 p.POSITION_CONTROL,
-                targetPosition=float(np.clip(pos,-.95, .95)),
+                targetPosition=float(np.clip(pos, -0.95, 0.95)),
                 force=BRIDGE_FORCE,
                 maxVelocity=BRIDGE_VEL,
             )
@@ -244,7 +244,7 @@ class ManualController:
                 self.robot_id,
                 idx,
                 p.POSITION_CONTROL,
-                targetPosition=float(np.clip(pos, -.1, 0)),
+                targetPosition=float(np.clip(pos, -0.1, 0)),
                 force=LIFT_FORCE,
                 maxVelocity=LIFT_VEL,
             )
@@ -254,7 +254,7 @@ class ManualController:
         row, col = self.env.nearest_panel()
         cleaned = len(self.env.cleaned_set)
         total = len(self.env.panel_ids)
-        print(f"\n  ── Status ─────────────────────────────")
+        print("\n  ── Status ─────────────────────────────")
         print(f"  Robot pos   : ({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f})")
         print(
             f"  Nearest panel: ({row},{col})  "
@@ -273,7 +273,7 @@ class ManualController:
         )
         print(f"  Front legs  : {'DOWN' if self.front_legs_down else 'up'}")
         print(f"  Rear  legs  : {'DOWN' if self.rear_legs_down else 'up'}")
-        print(f"  ───────────────────────────────────────\n")
+        print("  ───────────────────────────────────────\n")
 
     # ── key handler ─────────────────────────────────────────
     def _handle_key(self, key: int, state) -> bool:
@@ -389,13 +389,24 @@ class ManualController:
                             self._stop_wheels()
                             return
 
-                # Step physics + suction for inclined panels
                 self.env.step()
+
                 if self.suction_at_base_on:
                     self.apply_suction_on_base(force_n=320.0)
 
                 if self.suction_at_pads_on:
                     self.apply_suction_on_legs(force_n=100)
+
+                is_gap, dist = self.env.detect_gap(range_m=0.2)
+
+                if is_gap:
+                    print(
+                        f"⚠️[LIDAR REPORT] GAP DETECTED ahead! No panel within {dist:.2f}m."
+                    )
+                else:
+                    # This prints the current clearance distance to the panel
+                    print(f"[LIDAR STATUS] Surface OK. Distance to panel: {dist:.3f}m")
+
                 time.sleep(1.0 / 240.0)
 
         except KeyboardInterrupt:
