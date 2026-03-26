@@ -90,8 +90,8 @@ class SolarPanelEnvironment:
             for col in range(4):
                 cx = row * r_step
                 cy = col * c_step - 1.5 * c_step
-                # raise each successive row by its height on the slope
-                cz = ht + 0.002 + row * self.PANEL_LENGTH * math.sin(tilt)
+
+                cz = ht + 0.002 + cx * math.tan(tilt)
                 orn = p.getQuaternionFromEuler([0, -tilt, 0])
 
                 hl, hw = self.PANEL_LENGTH / 2, self.PANEL_WIDTH / 2

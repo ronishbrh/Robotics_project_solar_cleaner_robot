@@ -171,7 +171,7 @@ class ManualController:
         fvec = [-nx * force_n, -ny * force_n, -nz * force_n]
         p.applyExternalForce(self.robot_id, -1, fvec, [0, 0, 0], p.LINK_FRAME)
 
-    def apply_suction_on_legs(self, force_n=30.0):
+    def apply_suction_on_legs(self, force_n=1300.0):
         if self.robot_id is None:
             return
         d = [0, 0, -1]
@@ -216,13 +216,13 @@ class ManualController:
 
         # ─ Pivot / forward / backward
         if key in (p.B3G_UP_ARROW, ord("w"), ord("W")) and state & p.KEY_IS_DOWN:
-            self._set_wheels(v, v)
-        elif key in (p.B3G_DOWN_ARROW, ord("s"), ord("S")) and state & p.KEY_IS_DOWN:
             self._set_wheels(-v, -v)
+        elif key in (p.B3G_DOWN_ARROW, ord("s"), ord("S")) and state & p.KEY_IS_DOWN:
+            self._set_wheels(v, v)
         elif key in (p.B3G_LEFT_ARROW, ord("a"), ord("A")) and state & p.KEY_IS_DOWN:
-            self._set_wheels(-0.7 * v, v)  # Pivot left in place
+            self._set_wheels(v, -v)  # Pivot left in place
         elif key in (p.B3G_RIGHT_ARROW, ord("d"), ord("D")) and state & p.KEY_IS_DOWN:
-            self._set_wheels(v, -0.7 * v)  # Pivot right in place
+            self._set_wheels(-v, v)  # Pivot right in place
 
         # ─ Brush
         elif key in (ord("b"), ord("B")) and state & p.KEY_WAS_TRIGGERED:
@@ -274,8 +274,8 @@ class ManualController:
             self.lift_pos = min(self.lift_pos + LIFT_STEP, 0)
             self._set_lift(self.lift_pos)
             print(f"Body lift ▼ {self.lift_pos*1000:.0f} mm")
-            if self.lift_pos == 0:
-                self.suction_at_base_on = True
+            # if self.lift_pos == 0:
+            #     self.suction_at_base_on = True
 
         # ─ Status / Quit
         elif key in (ord("p"), ord("P")) and state & p.KEY_WAS_TRIGGERED:
@@ -329,7 +329,7 @@ class ManualController:
                 if self.suction_at_base_on:
                     self.apply_suction_on_base(force_n=600.0)
                 if self.suction_at_pads_on:
-                    self.apply_suction_on_legs(force_n=400)
+                    self.apply_suction_on_legs(force_n=1800)
 
                 is_gap, dist = self.env.detect_gap(range_m=0.2)
                 if is_gap:
