@@ -90,8 +90,8 @@ class SolarPanelEnvironment:
             for col in range(4):
                 cx = row * r_step
                 cy = col * c_step - 1.5 * c_step
-
-                cz = ht + 0.002 + cx * math.tan(tilt)
+                # raise each successive row by its height on the slope
+                cz = ht + 0.002 + row * self.PANEL_LENGTH * math.sin(tilt)
                 orn = p.getQuaternionFromEuler([0, -tilt, 0])
 
                 hl, hw = self.PANEL_LENGTH / 2, self.PANEL_WIDTH / 2
@@ -113,7 +113,7 @@ class SolarPanelEnvironment:
                 p.changeDynamics(
                     pid,
                     -1,
-                    lateralFriction=1.5,
+                    lateralFriction=0.4,
                     spinningFriction=0.05,
                     rollingFriction=0.01,
                 )
@@ -127,11 +127,7 @@ class SolarPanelEnvironment:
         p0 = self.panel_ids[0]["pos"]
 
         # Spawn robot above panel (0,0), aligned to panel slope
-        spawn = [
-            p0[0] + 0.40 * math.cos(tilt),
-            col0_y,
-            p0[2] + 0.40 * math.sin(tilt) + 0.16,
-        ]
+        spawn = [p0[0] + 0.40 * math.cos(tilt), col0_y, p0[2] + 0.40 * math.sin(tilt) + 0.16]
         orn = p.getQuaternionFromEuler([0, -tilt, 0])
 
         self.robot_id = p.loadURDF(
@@ -151,6 +147,7 @@ class SolarPanelEnvironment:
             self.joint_indices[name] = i
             tstr = {0: "revolute", 1: "prismatic", 4: "fixed"}.get(jtype, "?")
             print(f"  [{i:2d}] {name:<42} ({tstr})")
+
 
         # for i in range(nj):
         #     jtype = p.getJointInfo(self.robot_id, i)[2]
@@ -181,41 +178,35 @@ class SolarPanelEnvironment:
             "wheel_rr_joint",
         ):
             idx = self.joint_indices.get(name, -1)
-            if idx >= 0:
-                tilt_deg = self.panel_tilt_deg
-                lateral_friction = 0.8
-                p.changeDynamics(
-                    self.robot_id,
-                    idx,
-                    lateralFriction=lateral_friction,
-                    rollingFriction=0.02,
-                    spinningFriction=0.0,
-                )
-                p.setJointMotorControl2(
-                    self.robot_id,
-                    idx,
-                    p.VELOCITY_CONTROL,
-                    targetVelocity=0.0,
-                    force=1200,  # keep same force
-                )
+            if idx < 0:
+                print(f"  [WARN] wheel joint not found: {name}")
+                continue
+            # Remove all joint damping so wheels spin freely
+            p.changeDynamics(
+                self.robot_id,
+                idx,
+                lateralFriction=0.4,
+                linearDamping=0.0,
+                angularDamping=0.0,
+                jointDamping=0.0,
+            )
 
-        cup_names = [
-            "front_left_pad",
-            "front_right_pad",
-            "rear_left_pad",
-            "rear_right_pad",
-        ]
+            p.setJointMotorControl2(
+                self.robot_id, idx, p.VELOCITY_CONTROL, targetVelocity=0.0, force=0.0
+            )
+
+        cup_names = [ "front_left_pad", "front_right_pad", "rear_left_pad", "rear_right_pad"]
         for i in range(nj):
             lname = p.getJointInfo(self.robot_id, i)[12].decode()
 
-            # if lname.startswith("wheel_"):
-            #     p.changeDynamics(
-            #         self.robot_id,
-            #         i,
-            #         lateralFriction=0.4,
-            #         rollingFriction=0.002,
-            #         spinningFriction=0.001,
-            #     )
+            if lname.startswith("wheel_"):
+                p.changeDynamics(
+                    self.robot_id,
+                    i,
+                    lateralFriction=0.4,
+                    rollingFriction=0.002,
+                    spinningFriction=0.001,
+                )
 
             if lname in cup_names:
                 print("Found cup")
@@ -223,12 +214,13 @@ class SolarPanelEnvironment:
                 p.changeDynamics(
                     self.robot_id,
                     i,
-                    lateralFriction=2.0,
-                    spinningFriction=0.2,
-                    rollingFriction=0.05,
+                    lateralFriction=0.4,
+                    spinningFriction=0.05,
+                    rollingFriction=0.01,
                 )
 
-        # for _ in range(400):
+
+        #for _ in range(400):
         #    p.stepSimulation()
 
         pos, _ = p.getBasePositionAndOrientation(self.robot_id)
@@ -277,6 +269,7 @@ class SolarPanelEnvironment:
         print(
             f"[ENV] Panel ({row},{col}) cleaned " f"[{len(self.cleaned_set)}/{total}]"
         )
+
 
     def detect_gap(self, range_m=0.3):
         # 1. Find the lidar link index (usually 1 or 2 in your URDF)
