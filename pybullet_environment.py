@@ -113,9 +113,9 @@ class SolarPanelEnvironment:
                 p.changeDynamics(
                     pid,
                     -1,
-                    lateralFriction=0.4,
-                    spinningFriction=0.05,
-                    rollingFriction=0.01,
+                    lateralFriction=0.2,
+                    spinningFriction=0.001,
+                    rollingFriction=0.0001,
                 )
                 self.panel_ids.append(
                     dict(id=pid, row=row, col=col, pos=[cx, cy, cz], cleaned=False)
@@ -185,28 +185,21 @@ class SolarPanelEnvironment:
             p.changeDynamics(
                 self.robot_id,
                 idx,
-                lateralFriction=0.4,
-                linearDamping=0.0,
-                angularDamping=0.0,
-                jointDamping=0.0,
+                lateralFriction=1.2,
+                rollingFriction=0.02,
+                spinningFriction=0.0,
             )
-
             p.setJointMotorControl2(
-                self.robot_id, idx, p.VELOCITY_CONTROL, targetVelocity=0.0, force=0.0
+                self.robot_id,
+                idx,
+                p.VELOCITY_CONTROL,
+                targetVelocity=0.0,
+                force=1200,  # keep same force
             )
 
         cup_names = [ "front_left_pad", "front_right_pad", "rear_left_pad", "rear_right_pad"]
         for i in range(nj):
             lname = p.getJointInfo(self.robot_id, i)[12].decode()
-
-            if lname.startswith("wheel_"):
-                p.changeDynamics(
-                    self.robot_id,
-                    i,
-                    lateralFriction=0.4,
-                    rollingFriction=0.002,
-                    spinningFriction=0.001,
-                )
 
             if lname in cup_names:
                 print("Found cup")
