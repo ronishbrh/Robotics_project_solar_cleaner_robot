@@ -91,7 +91,7 @@ class SolarPanelEnvironment:
                 cx = row * r_step
                 cy = col * c_step - 1.5 * c_step
                 # raise each successive row by its height on the slope
-                cz = ht + 0.002 + row * self.PANEL_LENGTH * math.sin(tilt)
+                cz = ht + 0.002 + cx * math.tan(tilt)
                 orn = p.getQuaternionFromEuler([0, -tilt, 0])
 
                 hl, hw = self.PANEL_LENGTH / 2, self.PANEL_WIDTH / 2
@@ -127,7 +127,11 @@ class SolarPanelEnvironment:
         p0 = self.panel_ids[0]["pos"]
 
         # Spawn robot above panel (0,0), aligned to panel slope
-        spawn = [p0[0] + 0.40 * math.cos(tilt), col0_y, p0[2] + 0.40 * math.sin(tilt) + 0.16]
+        spawn = [
+            p0[0] + 0.40 * math.cos(tilt),
+            col0_y,
+            p0[2] + 0.40 * math.sin(tilt) + 0.16,
+        ]
         orn = p.getQuaternionFromEuler([0, -tilt, 0])
 
         self.robot_id = p.loadURDF(
@@ -147,7 +151,6 @@ class SolarPanelEnvironment:
             self.joint_indices[name] = i
             tstr = {0: "revolute", 1: "prismatic", 4: "fixed"}.get(jtype, "?")
             print(f"  [{i:2d}] {name:<42} ({tstr})")
-
 
         # for i in range(nj):
         #     jtype = p.getJointInfo(self.robot_id, i)[2]
@@ -195,7 +198,12 @@ class SolarPanelEnvironment:
                 self.robot_id, idx, p.VELOCITY_CONTROL, targetVelocity=0.0, force=0.0
             )
 
-        cup_names = [ "front_left_pad", "front_right_pad", "rear_left_pad", "rear_right_pad"]
+        cup_names = [
+            "front_left_pad",
+            "front_right_pad",
+            "rear_left_pad",
+            "rear_right_pad",
+        ]
         for i in range(nj):
             lname = p.getJointInfo(self.robot_id, i)[12].decode()
 
@@ -219,8 +227,7 @@ class SolarPanelEnvironment:
                     rollingFriction=0.01,
                 )
 
-
-        #for _ in range(400):
+        # for _ in range(400):
         #    p.stepSimulation()
 
         pos, _ = p.getBasePositionAndOrientation(self.robot_id)
@@ -269,7 +276,6 @@ class SolarPanelEnvironment:
         print(
             f"[ENV] Panel ({row},{col}) cleaned " f"[{len(self.cleaned_set)}/{total}]"
         )
-
 
     def detect_gap(self, range_m=0.3):
         # 1. Find the lidar link index (usually 1 or 2 in your URDF)
