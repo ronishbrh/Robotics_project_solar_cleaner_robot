@@ -329,7 +329,8 @@ class ManualController:
                 if self.suction_at_base_on:
                     self.apply_suction_on_base(force_n=600.0)
                 if self.suction_at_pads_on:
-                    self.apply_suction_on_legs(force_n=1800)
+                    tilt = math.radians(self.env.panel_tilt_deg)
+                    self.apply_suction_on_legs(800 + 2000 * math.sin(tilt))
 
                 is_gap, dist = self.env.detect_gap(range_m=0.2)
                 if is_gap:

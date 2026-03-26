@@ -223,9 +223,9 @@ class SolarPanelEnvironment:
                 p.changeDynamics(
                     self.robot_id,
                     i,
-                    lateralFriction=0.4,
-                    spinningFriction=0.05,
-                    rollingFriction=0.01,
+                    lateralFriction=2.0,
+                    spinningFriction=0.2,
+                    rollingFriction=0.05,
                 )
 
         # for _ in range(400):
