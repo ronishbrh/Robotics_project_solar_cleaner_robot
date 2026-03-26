@@ -61,7 +61,7 @@ BRUSH_SPEED = 12.0  # rad/s
 BRUSH_FORCE = 5.0
 BRIDGE_FORCE = 200.0
 BRIDGE_VEL = 0.20  # m/s
-SUCTION_FORCE = 120.0
+SUCTION_FORCE = 1200.0
 SUCTION_VEL = 0.08
 LIFT_FORCE = 300.0
 LIFT_VEL = 0.05
@@ -172,7 +172,7 @@ class ManualController:
         # start 0.08m below robot base (near wheel bottom)
         rf = [pos[0] + d[0] * 0.08, pos[1] + d[1] * 0.08, pos[2] + d[2] * 0.08]
         # end 0.06m further down
-        rt = [rf[0] + d[0] * 0.085, rf[1] + d[1] * 0.085, rf[2] + d[2] * 0.085]
+        rt = [rf[0] + d[0] * 0.095, rf[1] + d[1] * 0.095, rf[2] + d[2] * 0.095]
 
         res = p.rayTest(rf, rt)
         if not res:
@@ -183,8 +183,8 @@ class ManualController:
             return
 
         # Scale: full force when touching, zero at 0.02m gap
-        gap = hit_frac * 0.085
-        max_gap = 0.085
+        gap = hit_frac * 0.095
+        max_gap = 0.095
         if gap > max_gap:
             return
         scale = 1.0 - gap / max_gap
@@ -392,20 +392,13 @@ class ManualController:
                 self.env.step()
 
                 if self.suction_at_base_on:
-                    self.apply_suction_on_base(force_n=320.0)
+                    self.apply_suction_on_base(force_n=6000.0)
 
                 if self.suction_at_pads_on:
-                    self.apply_suction_on_legs(force_n=100)
+                    self.apply_suction_on_legs(force_n=4000)
 
                 is_gap, dist = self.env.detect_gap(range_m=0.2)
 
-                if is_gap:
-                    print(
-                        f"⚠️[LIDAR REPORT] GAP DETECTED ahead! No panel within {dist:.2f}m."
-                    )
-                else:
-                    # This prints the current clearance distance to the panel
-                    print(f"[LIDAR STATUS] Surface OK. Distance to panel: {dist:.3f}m")
 
                 time.sleep(1.0 / 240.0)
 
