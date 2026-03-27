@@ -85,7 +85,8 @@ class SolarPanelEnvironment:
         ht = self.PANEL_THICKNESS / 2
 
         # Surface normal for suction (rotated around Y by tilt)
-        self.panel_normal = (math.sin(tilt), 0.0, math.cos(tilt))
+        self.panel_normal = (math.cos(tilt + math.pi / 2), 0.0, math.sin(tilt + math.pi / 2))
+        print(f"asporpweoripoweirsldPanel normaa: {self.panel_normal}");
 
         for row in range(3):
             for col in range(4):

@@ -169,10 +169,17 @@ class ManualController:
             -self.env.panel_normal[1],
             -self.env.panel_normal[2],
         ]  # into panel
-        # start 0.08m below robot base (near wheel bottom)
-        rf = [pos[0] + d[0] * 0.08, pos[1] + d[1] * 0.08, pos[2] + d[2] * 0.08]
+
+        wheel_center_from_base_center = 0.07
+        rf = [pos[0] + d[0] * wheel_center_from_base_center, pos[1] + d[1] * wheel_center_from_base_center, pos[2] + d[2] * wheel_center_from_base_center]
+
         # end 0.06m further down
-        rt = [rf[0] + d[0] * 0.095, rf[1] + d[1] * 0.095, rf[2] + d[2] * 0.095]
+        suction_effect_distance = 0.035 # diameter of wheel. arbitrary
+        ray_length = suction_effect_distance + 0.035 # diameter of wheel. arbitrary
+        rt = [rf[0] + d[0] * ray_length, rf[1] + d[1] * ray_length, rf[2] + d[2] * ray_length]
+
+        # print(f"d: {d}, start:{rf}, stop:{rt}");
+
 
         res = p.rayTest(rf, rt)
         if not res:
@@ -180,18 +187,23 @@ class ManualController:
         hit_body, _, hit_frac, _, _ = res[0]
         # Ignore self-hits and misses
         if hit_body == self.robot_id or hit_body == -1:
+            color = [1, 0, 0]
+            p.addUserDebugLine(rf, rt, color, lifeTime=0.05)
             return
 
-        # Scale: full force when touching, zero at 0.02m gap
-        gap = hit_frac * 0.095
-        max_gap = 0.095
-        if gap > max_gap:
+        color = [0, 1, 0]
+        p.addUserDebugLine(rf, rt, color, lifeTime=0.05)
+
+        # calculate force generated based on distance (is not but should be exponential)
+        gap = hit_frac * (suction_effect_distance + 0.035) - 0.035
+        if gap > suction_effect_distance:
             return
-        scale = 1.0 - gap / max_gap
-        # fvec = [d[0] * force_n * scale, d[1] * force_n * scale, d[2] * force_n * scale]
+        scale = 1.0 - gap / suction_effect_distance
         fvec = [0, 0, -force_n * scale]
         p.applyExternalForce(self.robot_id, -1, fvec, [0,0,0], p.LINK_FRAME)
-        print("Force at base")
+
+        #print(f"Force applied at base: {fvec}, gap: {gap}, max: {suction_effect_distance}, scale: {scale}");
+        #print("Force at base")
 
     def apply_suction_on_legs(self, force_n=30.0):
         if self.robot_id is None:
@@ -208,7 +220,7 @@ class ManualController:
             state = p.getLinkState(self.robot_id, cup_link)
             cup_pos = state[0]
 
-            very_small = 0.005
+            very_small = 0.0051
             # start 0.08m below robot base (near wheel bottom)
             rf = [cup_pos[0] + d[0] * very_small, cup_pos[1] + d[1] * very_small, cup_pos[2] + d[2] * very_small]
             # end 0.06m further down
@@ -218,21 +230,23 @@ class ManualController:
 
             if not res:
                 return
-            print("Hit something", res[0][0], [item['id'] for item in self.env.panel_ids])
 
             hit_body, _, hit_frac, _, _ = res[0]
 
+            color = [1, 0, 0]
             if hit_body in [item['id'] for item in self.env.panel_ids]:
+                color = [0, 1, 0]
+                print("Hit something", res[0][0], [item['id'] for item in self.env.panel_ids])
                 gap = hit_frac * 0.03
-                max_gap = 0.020
+                max_gap = 0.03
                 if gap > max_gap:
                     return
                 scale = 1.0 - gap / max_gap
-                # fvec = [d[0] * force_n * scale, d[1] * force_n * scale, d[2] * force_n * scale]
-                # p.applyExternalForce(self.robot_id, cup_link, fvec, cup_pos, p.WORLD_FRAME)
                 fvec = [0, 0, -force_n * scale]
                 p.applyExternalForce(self.robot_id, cup_link, fvec, [0,0,0], p.LINK_FRAME)
-                print("Applying suction at pad: ", cup_link, "at panel: ", hit_body)
+                #print("Applying suction at pad: ", cup_link, "at panel: ", hit_body)
+
+            p.addUserDebugLine(rf, rt, color, lifeTime=0.05)
             
 
 

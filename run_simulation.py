@@ -20,7 +20,7 @@ def main():
     if len(sys.argv) > 1:
         try:
             tilt = float(sys.argv[1])
-            tilt = max(0.0, min(tilt, 45.0))
+            tilt = max(0.0, min(tilt, 90.0))
         except ValueError:
             print("Usage: python run_simulation.py [tilt_degrees]")
             sys.exit(1)
