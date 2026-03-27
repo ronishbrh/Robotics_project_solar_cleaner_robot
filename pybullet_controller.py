@@ -56,7 +56,7 @@ import time
 
 
 WHEEL_SPEED = 16.0  # rad/s
-WHEEL_FORCE = 800.0  # N
+WHEEL_FORCE = 1200.0  # N
 BRUSH_SPEED = 12.0  # rad/s
 BRUSH_FORCE = 5.0
 BRIDGE_FORCE = 200.0

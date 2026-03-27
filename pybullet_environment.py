@@ -33,6 +33,7 @@ class SolarPanelEnvironment:
         p.setGravity(0, 0, -9.81)
 
         p.setPhysicsEngineParameter(numSolverIterations=150)
+        p.setPhysicsEngineParameter(enableConeFriction=False)
 
         self.panel_tilt_deg = float(panel_tilt_deg)
         self.panel_ids = []  # list of dicts
@@ -113,7 +114,7 @@ class SolarPanelEnvironment:
                 p.changeDynamics(
                     pid,
                     -1,
-                    lateralFriction=0.2,
+                    lateralFriction=0.4,
                     spinningFriction=0.001,
                     rollingFriction=0.0001,
                 )
@@ -190,7 +191,7 @@ class SolarPanelEnvironment:
                 idx,
                 lateralFriction=1.2,
                 rollingFriction=0.02,
-                spinningFriction=0.0,
+                spinningFriction=0.01,
             )
             p.setJointMotorControl2(
                 self.robot_id,
@@ -215,9 +216,9 @@ class SolarPanelEnvironment:
                 p.changeDynamics(
                     self.robot_id,
                     i,
-                    lateralFriction=0.4,
+                    lateralFriction=1.2,
                     spinningFriction=0.05,
-                    rollingFriction=0.01,
+                    rollingFriction=0.05,
                 )
 
         # for _ in range(400):
