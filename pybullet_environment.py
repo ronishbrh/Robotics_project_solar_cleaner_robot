@@ -46,8 +46,8 @@ class SolarPanelEnvironment:
         # Ground plane
         p.loadURDF("plane.urdf")
 
-        self._setup_camera()
         self._build_panels()
+        self._setup_camera()
         self.panel_positions = {(d["row"], d["col"]): d["pos"] for d in self.panel_ids}
 
         if urdf_path and os.path.exists(urdf_path):
@@ -69,10 +69,10 @@ class SolarPanelEnvironment:
     # ------------------------------------------------------------------ #
     def _setup_camera(self):
         p.resetDebugVisualizerCamera(
-            cameraDistance=5.5,
-            cameraYaw=40,
-            cameraPitch=-30,
-            cameraTargetPosition=[2.0, 0.0, 0.5],
+            cameraDistance=2.5,
+            cameraYaw=-80,
+            cameraPitch=-60,
+            cameraTargetPosition=self.panel_ids[0]["pos"],
         )
 
     # ------------------------------------------------------------------ #
@@ -234,6 +234,14 @@ class SolarPanelEnvironment:
         pos, _ = p.getBasePositionAndOrientation(self.robot_id)
         ncon = len(p.getContactPoints(self.robot_id))
         print(f"[ENV] Settled at {[round(v,3) for v in pos]}, contacts={ncon}")
+
+
+    def get_robot_yaw(self):
+        """Returns current robot yaw in radians"""
+        pos, orn = p.getBasePositionAndOrientation(self.robot_id)
+        _, _, yaw = p.getEulerFromQuaternion(orn)
+        return yaw
+
 
     def add_dirt_patches(self):
         dirty = [(0, 0), (0, 2), (1, 1), (1, 3), (2, 0), (2, 2), (2, 3)]
