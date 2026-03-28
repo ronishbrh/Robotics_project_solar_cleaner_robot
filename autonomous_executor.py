@@ -331,49 +331,53 @@ def run_autonomous(env):
 
     rows = 3
     cols = 4
+    last_row = rows - 1
     path = generate_path(rows, cols)
+    print(f"Path: {path}")
     if not robot.ctrl.suction_at_base_on:
         robot.suction_base_toggle()
 
     for r, c in path:
         print(f"\n>>> PANEL ({r},{c})")
+        print(f"\n>>> Last Row {last_row}")
 
-        clean_panel(robot, last_panel_in_row=r + 1 == rows)
+        clean_panel(robot, last_panel_in_row=r == last_row)
 
-        if r + 1 == rows:
+        if r == last_row:
             if robot.alternating_in_panel == robot.alternating_across_panels:
                 if robot.alternating_across_panels == "left":
-                    # rotate_left(robot, steps=TURN_STEPS * 2)
                     rotate_left_exact(robot)
+                    # rotate_left(robot, steps=TURN_STEPS*2)
                     robot.alternating_across_panels = "right"
                 elif robot.alternating_across_panels == "right":
-                    # rotate_right(robot, steps=TURN_STEPS * 2)
                     rotate_right_exact(robot)
+                    # rotate_right(robot, steps=TURN_STEPS*2)
                     robot.alternating_across_panels = "left"
             else:
                 if robot.alternating_in_panel == "left":
                     robot.alternating_in_panel = "right"
+                    robot.alternating_across_panels = "left"
                 elif robot.alternating_in_panel == "right":
                     robot.alternating_in_panel = "left"
+                    robot.alternating_across_panels = "right"
+
+            env.clean_panel(r, c)
 
         safe_forward(robot)
         cross_gap(robot)
 
-        if r + 1 != rows:
-
+        if r != last_row:
             if robot.alternating_in_panel == "left":
-
                 rotate_left_exact(robot)
-
+                # rotate_left(robot, steps=TURN_STEPS)
                 robot.alternating_in_panel = "right"
-
             elif robot.alternating_in_panel == "right":
-
                 rotate_right_exact(robot)
-
+                # rotate_right(robot, steps=TURN_STEPS)
                 robot.alternating_in_panel = "left"
 
-        env.clean_panel(r, c)
+        if r == last_row:
+            last_row = 0 if last_row == rows - 1 else rows - 1
 
     print("\n===== ALL PANELS CLEANED =====\n")
 
@@ -388,7 +392,7 @@ if __name__ == "__main__":
     from pybullet_environment import SolarPanelEnvironment
 
     env = SolarPanelEnvironment(
-        gui=True, urdf_path="solar_robot_pybullet.urdf", panel_tilt_deg=0
+        gui=True, urdf_path="solar_robot_pybullet.urdf", panel_tilt_deg=45
     )
     env.add_dirt_patches()
     run_autonomous(env)
