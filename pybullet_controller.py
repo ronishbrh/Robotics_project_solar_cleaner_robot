@@ -94,6 +94,8 @@ class ManualController:
         right → FR + RR joints
         Positive = robot moves FORWARD (+X). No sign inversion.
         """
+        left=-left
+        right=-right
         pairs = [
             ("wheel_fl_joint", left),
             ("wheel_rl_joint", left),

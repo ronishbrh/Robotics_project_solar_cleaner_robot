@@ -85,8 +85,12 @@ class SolarPanelEnvironment:
         ht = self.PANEL_THICKNESS / 2
 
         # Surface normal for suction (rotated around Y by tilt)
-        self.panel_normal = (math.cos(tilt + math.pi / 2), 0.0, math.sin(tilt + math.pi / 2))
-        print(f"asporpweoripoweirsldPanel normaa: {self.panel_normal}");
+        self.panel_normal = (
+            math.cos(tilt + math.pi / 2),
+            0.0,
+            math.sin(tilt + math.pi / 2),
+        )
+        print(f"asporpweoripoweirsldPanel normaa: {self.panel_normal}")
 
         for row in range(3):
             for col in range(4):
@@ -125,16 +129,17 @@ class SolarPanelEnvironment:
 
     def _load_robot(self, urdf_path):
         tilt = math.radians(self.panel_tilt_deg)
-        col0_y = -1.5 * (self.PANEL_WIDTH + self.PANEL_COL_GAP)
+        col0_y = -1.80 * (self.PANEL_WIDTH + self.PANEL_COL_GAP)
         p0 = self.panel_ids[0]["pos"]
 
         # Spawn robot above panel (0,0), aligned to panel slope
         spawn = [
-            p0[0] + 0.40 * math.cos(tilt),
+            p0[0] - 0.55 * math.cos(tilt),
             col0_y,
             p0[2] + 0.40 * math.sin(tilt) + 0.16,
         ]
-        orn = p.getQuaternionFromEuler([0, -tilt, 0])
+
+        orn = p.getQuaternionFromEuler([0, -tilt, math.pi/2])
 
         self.robot_id = p.loadURDF(
             urdf_path,
@@ -273,49 +278,54 @@ class SolarPanelEnvironment:
         )
 
     def detect_gap(self, range_m=0.3):
-        # 1. Find the lidar link index (usually 1 or 2 in your URDF)
-        # You can search for it by name once in __init__ or just use the index.
         lidar_link_name = "lidar"
         lidar_index = -1
+
+        # Find lidar
         for i in range(p.getNumJoints(self.robot_id)):
             if p.getJointInfo(self.robot_id, i)[12].decode("utf-8") == lidar_link_name:
                 lidar_index = i
                 break
 
-        # 2. Get current world position and orientation of the LiDAR link
+        if lidar_index == -1:
+            return False, range_m
+
+        # Get lidar position
         link_state = p.getLinkState(self.robot_id, lidar_index)
-        lidar_pos = link_state[0]  # (x, y, z)
-        lidar_ori = link_state[1]  # (x, y, z, w)
+        lidar_pos = link_state[0]
 
-        # 3. Calculate "Perpendicular Downward" relative to the LiDAR/Robot
-        rot_mat = p.getMatrixFromQuaternion(lidar_ori)
-        # In your URDF, the lidar is a cylinder standing up, so local Z is "Up"
-        # Indices 2, 5, 8 represent the local Z-axis (Up vector)
-        up_vec = [rot_mat[2], rot_mat[5], rot_mat[8]]
+        # ✅ USE PANEL NORMAL (THIS IS THE FIX)
+        nx, ny, nz = self.panel_normal
 
-        # Ray starts at LiDAR position
+        # Shoot INTO the panel (negative normal)
+        ray_dir = [-nx, -ny, -nz]
+
         ray_start = lidar_pos
-
-        # Ray ends range_m distance "Down" (negative Up vector)
         ray_end = [
-            ray_start[0] - up_vec[0] * range_m,
-            ray_start[1] - up_vec[1] * range_m,
-            ray_start[2] - up_vec[2] * range_m,
+            lidar_pos[0] + ray_dir[0] * range_m,
+            lidar_pos[1] + ray_dir[1] * range_m,
+            lidar_pos[2] + ray_dir[2] * range_m,
         ]
 
-        # 4. Cast Ray
         result = p.rayTest(ray_start, ray_end)
         hit_body = result[0][0]
-        hit_fraction = result[0][2]
+        hit_frac = result[0][2]
 
-        # Visual feedback: Red line for gap, Green for panel
-        color = [1, 0, 0] if hit_body == -1 else [0, 1, 0]
+        # Ignore self hits
+        if hit_body == self.robot_id:
+            hit_body = -1
+
+        # Ground or nothing = gap
+        is_gap = hit_body == -1 or hit_body == 0
+
+        # Debug line
+        color = [1, 0, 0] if is_gap else [0, 1, 0]
         p.addUserDebugLine(ray_start, ray_end, color, lifeTime=0.05)
 
-        if hit_body == -1:
-            return True, range_m  # Gap detected
+        if is_gap:
+            return True, range_m
         else:
-            return False, hit_fraction * range_m  # Panel detected
+            return False, hit_frac * range_m
 
     def nearest_panel(self):
 

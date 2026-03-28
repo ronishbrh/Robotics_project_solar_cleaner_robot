@@ -1,0 +1,337 @@
+"""
+autonomous_executor.py
+Sensor-based autonomous controller
+
+Wheel convention (confirmed):
+  FORWARD  : set_wheels(-v, -v)
+  BACKWARD : set_wheels(+v, +v)
+  ROT LEFT : set_wheels(+v, -v)
+  ROT RIGHT: set_wheels(-v, +v)
+
+Gap crossing sequence (from key observation):
+  1  bridge forward  (+0.10)
+  4  suction pads ON
+  L  lift UP
+  3  suction base ON
+  drive forward until landed on next panel
+  2  bridge back
+  3  suction base OFF
+  4  suction pads OFF
+  K  lift DOWN
+  0  bridge center
+"""
+
+import time
+from pybullet_controller import ManualController
+
+TURN_STEPS = 860
+SIM_DT = 1.0 / 240.0
+SLOW = 2.0
+
+FWD = 8.0  # forward
+BACK = -8.0  # backward
+ROT = 8.0  # rotation magnitude
+LIFT_STEP = 0.1  # must match ManualController.LIFT_STEP
+
+
+# ─────────────────────────────────────────────
+# ROBOT WRAPPER
+# ─────────────────────────────────────────────
+class AutoRobot:
+
+    def __init__(self, ctrl):
+        self.ctrl = ctrl
+        self.env = ctrl.env
+        self.alternating_direction = "right"
+
+    def tick(self):
+        self.env.step()
+        if self.ctrl.suction_at_base_on:
+            self.ctrl.apply_suction_on_base(6000)
+        if self.ctrl.suction_at_pads_on:
+            self.ctrl.apply_suction_on_legs(4000)
+        time.sleep(SIM_DT * SLOW)
+
+    def stop(self):
+        self.ctrl._stop_wheels()
+
+    def set_wheels(self, l, r):
+        self.ctrl._set_wheels(l, r)
+
+    def wait(self, steps):
+        for _ in range(steps):
+            self.tick()
+
+    # ── ACTUATORS (named after key presses) ───
+
+    def bridge_forward(self):  # key 1
+        print("  [1] BRIDGE FORWARD")
+        self.ctrl.bridge = min(self.ctrl.bridge + 0.10, 0.32)
+        self.ctrl._set_bridge(self.ctrl.bridge)
+        self.wait(120)
+
+    def bridge_backward(self):  # key 2
+        print("  [2] BRIDGE BACKWARD")
+        self.ctrl.bridge = max(self.ctrl.bridge - 0.10, -0.32)
+        self.ctrl._set_bridge(self.ctrl.bridge)
+        self.wait(120)
+
+    def bridge_center(self):  # key 0
+        print("  [0] BRIDGE CENTER")
+        self.ctrl.bridge = 0
+        self.ctrl._set_bridge(self.ctrl.bridge)
+        self.wait(120)
+
+    def suction_base_toggle(self):  # key 3 — toggles
+        self.ctrl.suction_at_base_on = not self.ctrl.suction_at_base_on
+        print(f"  [3] Suction at base = {self.ctrl.suction_at_base_on}")
+
+    def suction_pads_toggle(self):  # key 4 — toggles
+        self.ctrl.suction_at_pads_on = not self.ctrl.suction_at_pads_on
+        print(f"  [4] Suction at pads = {self.ctrl.suction_at_pads_on}")
+
+    def lift_up(self):  # key L
+        print("  [L] LIFT UP")
+        self.ctrl.lift_pos = max(self.ctrl.lift_pos - LIFT_STEP, -0.1)
+        self.ctrl._set_lift(-0.1)
+        self.wait(120)
+
+    def lift_down(self):  # key K
+        print("  [K] LIFT DOWN")
+        self.ctrl.lift_pos = min(self.ctrl.lift_pos + LIFT_STEP, 0)
+        self.ctrl._set_lift(self.ctrl.lift_pos)
+        self.wait(120)
+
+
+# ─────────────────────────────────────────────
+# PRIMITIVES
+# ─────────────────────────────────────────────
+def safe_forward(robot, max_steps=2000):
+    """
+    Drive forward until the lidar goes red (no panel directly below = gap edge).
+    Stops the robot right at the gap edge and returns 'gap'.
+    """
+    print("  >> safe_forward")
+    for _ in range(max_steps):
+        is_gap, _ = robot.env.detect_gap(range_m=0.3)
+        if is_gap:
+            robot.stop()
+            print("  ⚠ LIDAR RED — at gap edge, stopped")
+            return "gap"
+        robot.set_wheels(FWD, FWD)
+        robot.tick()
+    robot.stop()
+    return "done"
+
+
+def safe_backward(robot, steps=100):
+    print("  >> safe_backward")
+    for _ in range(steps):
+        robot.set_wheels(BACK, BACK)
+        robot.tick()
+    robot.stop()
+
+
+def rotate_left(robot, steps=120):
+    print("  >> rotate_left")
+    for _ in range(steps):
+        robot.set_wheels(-ROT, ROT)
+        robot.tick()
+    robot.stop()
+
+
+def rotate_right(robot, steps=120):
+    print("  >> rotate_right")
+    for _ in range(steps):
+        robot.set_wheels(ROT, -ROT)
+        robot.tick()
+    robot.stop()
+
+
+# ─────────────────────────────────────────────
+# GAP CROSSING
+# Robot has stopped at gap edge (lidar red).
+# 1. Back up slightly so rear wheels are safe
+# 2. Sequence: 1 → 4 → 3 → L → drive forward until landed → 2 → 3 → K → 0
+# ─────────────────────────────────────────────
+def cross_gap(robot):
+    print("\n=== CROSSING GAP ===")
+
+    # Back up slightly so robot isn't teetering on edge
+    print("  >> backing up from edge...")
+    safe_backward(robot, steps=40)
+
+    robot.bridge_forward()  # 1 — bridge extends forward
+    robot.bridge_forward()
+    robot.bridge_forward()
+    robot.suction_pads_toggle()  # 4 — pads ON
+
+    robot.wait(240)
+    robot.lift_up()
+    robot.wait(240)
+    if robot.ctrl.suction_at_base_on:
+        robot.suction_base_toggle()
+
+    # Drive forward until lidar sees next panel (not ground plane)
+    print("  >> driving across gap...")
+    for _ in range(1000):
+        robot.set_wheels(FWD, FWD)
+        robot.tick()
+        is_gap, _ = robot.env.detect_gap(range_m=0.35)
+        if not is_gap:
+            print("  ✅ LIDAR GREEN — landed on next panel")
+            for _ in range(80):
+                robot.set_wheels(FWD, FWD)
+                robot.tick()
+            break
+    robot.stop()
+
+    robot.bridge_backward()
+    robot.bridge_backward()
+    robot.bridge_backward()
+    robot.bridge_backward()
+    robot.bridge_backward()
+    robot.bridge_backward()
+
+    # 3 — base suction OFF
+    if not robot.ctrl.suction_at_base_on:
+        robot.suction_base_toggle()
+
+    robot.lift_down()
+    robot.wait(240)
+    print("lift down sakyo")
+    if robot.ctrl.suction_at_pads_on:
+        print("Suction pads on cha")
+        robot.suction_pads_toggle()
+    robot.bridge_center()  # 0 — centre bridge
+    print("bridge center bhayo")
+
+    # Re-enable base suction for normal driving on new panel
+    if not robot.ctrl.suction_at_base_on:
+        robot.suction_base_toggle()
+    print("  [3] Suction at base = ON (restored)")
+
+    print("=== GAP CROSSED ===\n")
+
+
+# ─────────────────────────────────────────────
+# CLEAN ONE PANEL — simple sweep
+# ─────────────────────────────────────────────
+
+
+def clean_panel(robot):
+    print("  >> cleaning panel")
+    PASSES = 3
+
+    for pass_n in range(PASSES):
+        print(f"  pass {pass_n + 1}/3")
+        result = safe_forward(robot)
+
+        if result == "gap":
+            print("Gap detected: Edge reached")
+
+            # Already stopped at gap edge — cross it
+            # cross_gap(robot)
+            # print("cross gap finish")
+
+        safe_backward(robot, steps=50)
+        if(robot.alternating_direction == "left"):
+            rotate_left(robot, steps=TURN_STEPS)
+            if(pass_n + 1 == PASSES):
+                break
+            safe_forward(robot, max_steps = 100)
+            rotate_left(robot, steps=TURN_STEPS)
+            robot.alternating_direction = "right"
+        elif(robot.alternating_direction == "right"):
+            rotate_right(robot, steps=TURN_STEPS)
+            if(pass_n + 1 == PASSES):
+                break
+            safe_forward(robot, max_steps = 100)
+            rotate_right(robot, steps=TURN_STEPS)
+            robot.alternating_direction = "left"
+        else:
+            print("Programmer error")
+
+    print("  >> panel done")
+
+
+# ─────────────────────────────────────────────
+# SNAKE PATH GENERATOR
+# col 0: rows 0→2, col 1: rows 2→0, col 2: rows 0→2 ...
+# ─────────────────────────────────────────────
+def generate_path(rows=3, cols=4):
+    path = []
+    for c in range(cols):
+        col_rows = range(rows) if c % 2 == 0 else reversed(range(rows))
+        for r in col_rows:
+            path.append((r, c))
+    return path
+
+
+# ─────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────
+def run_autonomous(env):
+    ctrl = ManualController(env.robot_id, env)
+    robot = AutoRobot(ctrl)
+
+    print("\n===== AUTONOMOUS START =====\n")
+
+    # suction_at_base_on is True by default in ManualController
+    # just settle with suction active
+    print("  >> settling (suction active)...")
+    robot.wait(240)
+
+    path = generate_path()
+    prev = None
+    if not robot.ctrl.suction_at_base_on:
+        robot.suction_base_toggle()
+
+    for r, c in path:
+        print(f"\n>>> PANEL ({r},{c})")
+
+        if prev is not None:
+            prev_r, prev_c = prev
+
+            if c != prev_c:
+                # New column → rotate 90° and drive across, then rotate back
+                print("  >> column transition (Y move)")
+                rotate_left(robot)
+                safe_forward(robot)
+                rotate_right(robot)
+
+            elif r != prev_r:
+
+                print("  >> row change already handled during cleaning")
+
+        clean_panel(robot)
+        safe_forward(robot)
+        cross_gap(robot)
+
+        if(robot.alternating_direction == "left"):
+            rotate_left(robot, steps=TURN_STEPS)
+            robot.alternating_direction = "right"
+        elif(robot.alternating_direction == "right"):
+            rotate_right(robot, steps=TURN_STEPS)
+            robot.alternating_direction = "left"
+
+        env.clean_panel(r, c)
+        prev = (r, c)
+
+    print("\n===== ALL PANELS CLEANED =====\n")
+
+    while True:
+        robot.tick()
+
+
+# ─────────────────────────────────────────────
+# ENTRY POINT
+# ─────────────────────────────────────────────
+if __name__ == "__main__":
+    from pybullet_environment import SolarPanelEnvironment
+
+    env = SolarPanelEnvironment(
+        gui=True, urdf_path="solar_robot_pybullet.urdf", panel_tilt_deg=0
+    )
+    env.add_dirt_patches()
+    run_autonomous(env)
