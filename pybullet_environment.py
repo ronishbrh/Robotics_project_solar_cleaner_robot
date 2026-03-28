@@ -33,6 +33,7 @@ class SolarPanelEnvironment:
         p.setGravity(0, 0, -9.81)
 
         p.setPhysicsEngineParameter(numSolverIterations=150)
+        p.setPhysicsEngineParameter(enableConeFriction=False)
 
         self.panel_tilt_deg = float(panel_tilt_deg)
         self.panel_ids = []  # list of dicts
@@ -84,14 +85,15 @@ class SolarPanelEnvironment:
         ht = self.PANEL_THICKNESS / 2
 
         # Surface normal for suction (rotated around Y by tilt)
-        self.panel_normal = (math.sin(tilt), 0.0, math.cos(tilt))
+        self.panel_normal = (math.cos(tilt + math.pi / 2), 0.0, math.sin(tilt + math.pi / 2))
+        print(f"asporpweoripoweirsldPanel normaa: {self.panel_normal}");
 
         for row in range(3):
             for col in range(4):
                 cx = row * r_step
                 cy = col * c_step - 1.5 * c_step
                 # raise each successive row by its height on the slope
-                cz = ht + 0.002 + row * self.PANEL_LENGTH * math.sin(tilt)
+                cz = ht + 0.002 + cx * math.tan(tilt)
                 orn = p.getQuaternionFromEuler([0, -tilt, 0])
 
                 hl, hw = self.PANEL_LENGTH / 2, self.PANEL_WIDTH / 2
@@ -113,9 +115,9 @@ class SolarPanelEnvironment:
                 p.changeDynamics(
                     pid,
                     -1,
-                    lateralFriction=1.5,
-                    spinningFriction=0.05,
-                    rollingFriction=0.01,
+                    lateralFriction=0.4,
+                    spinningFriction=0.001,
+                    rollingFriction=0.0001,
                 )
                 self.panel_ids.append(
                     dict(id=pid, row=row, col=col, pos=[cx, cy, cz], cleaned=False)
@@ -181,23 +183,24 @@ class SolarPanelEnvironment:
             "wheel_rr_joint",
         ):
             idx = self.joint_indices.get(name, -1)
-            if idx >= 0:
-                tilt_deg = self.panel_tilt_deg
-                lateral_friction = 0.8
-                p.changeDynamics(
-                    self.robot_id,
-                    idx,
-                    lateralFriction=lateral_friction,
-                    rollingFriction=0.02,
-                    spinningFriction=0.0,
-                )
-                p.setJointMotorControl2(
-                    self.robot_id,
-                    idx,
-                    p.VELOCITY_CONTROL,
-                    targetVelocity=0.0,
-                    force=1200,  # keep same force
-                )
+            if idx < 0:
+                print(f"  [WARN] wheel joint not found: {name}")
+                continue
+            # Remove all joint damping so wheels spin freely
+            p.changeDynamics(
+                self.robot_id,
+                idx,
+                lateralFriction=1.2,
+                rollingFriction=0.02,
+                spinningFriction=0.01,
+            )
+            p.setJointMotorControl2(
+                self.robot_id,
+                idx,
+                p.VELOCITY_CONTROL,
+                targetVelocity=0.0,
+                force=1200,  # keep same force
+            )
 
         cup_names = [
             "front_left_pad",
@@ -208,24 +211,15 @@ class SolarPanelEnvironment:
         for i in range(nj):
             lname = p.getJointInfo(self.robot_id, i)[12].decode()
 
-            # if lname.startswith("wheel_"):
-            #     p.changeDynamics(
-            #         self.robot_id,
-            #         i,
-            #         lateralFriction=0.4,
-            #         rollingFriction=0.002,
-            #         spinningFriction=0.001,
-            #     )
-
             if lname in cup_names:
                 print("Found cup")
                 self.cup_links.append(i)
                 p.changeDynamics(
                     self.robot_id,
                     i,
-                    lateralFriction=0.4,
+                    lateralFriction=1.2,
                     spinningFriction=0.05,
-                    rollingFriction=0.01,
+                    rollingFriction=0.05,
                 )
 
         # for _ in range(400):
