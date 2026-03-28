@@ -308,16 +308,16 @@ def run_autonomous(env):
                 elif(robot.alternating_in_panel == "right"):
                     robot.alternating_in_panel = "left"
 
-
         safe_forward(robot)
         cross_gap(robot)
 
-        if(robot.alternating_in_panel == "left"):
-            rotate_left(robot, steps=TURN_STEPS)
-            robot.alternating_in_panel = "right"
-        elif(robot.alternating_in_panel == "right"):
-            rotate_right(robot, steps=TURN_STEPS)
-            robot.alternating_in_panel = "left"
+        if r+1 != rows:
+            if(robot.alternating_in_panel == "left"):
+                rotate_left(robot, steps=TURN_STEPS)
+                robot.alternating_in_panel = "right"
+            elif(robot.alternating_in_panel == "right"):
+                rotate_right(robot, steps=TURN_STEPS)
+                robot.alternating_in_panel = "left"
 
         env.clean_panel(r, c)
 
