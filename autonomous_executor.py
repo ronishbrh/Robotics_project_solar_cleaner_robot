@@ -280,7 +280,9 @@ def clean_panel(robot, last_panel_in_row=False):
             rotate_left_exact(robot)
             if pass_n + 1 == robot.PASSES:
                 break
-            safe_forward(robot, max_steps=360 + int((55) * math.sin(math.radians(robot.env.panel_tilt_deg))) * (1 if robot.alternating_across_panels == "left" else -1))
+            result = safe_forward(robot, max_steps=360 + int((52) * math.sin(math.radians(robot.env.panel_tilt_deg))) * (1 if robot.alternating_across_panels == "left" else -1))
+            if result == "gap":
+                safe_backward(robot, steps=40)
             # rotate_left(robot, steps=TURN_STEPS)
             rotate_left_exact(robot)
             robot.alternating_in_panel = "right"
@@ -289,7 +291,9 @@ def clean_panel(robot, last_panel_in_row=False):
             rotate_right_exact(robot)
             if pass_n + 1 == robot.PASSES:
                 break
-            safe_forward(robot, max_steps=360 + int((55) * math.sin(math.radians(robot.env.panel_tilt_deg))) * (1 if robot.alternating_across_panels == "left" else -1))
+            result = safe_forward(robot, max_steps=360 + int((52) * math.sin(math.radians(robot.env.panel_tilt_deg))) * (1 if robot.alternating_across_panels == "left" else -1))
+            if result == "gap":
+                safe_backward(robot, steps=40)
             # rotate_right(robot, steps=TURN_STEPS)
             rotate_right_exact(robot)
             robot.alternating_in_panel = "left"
