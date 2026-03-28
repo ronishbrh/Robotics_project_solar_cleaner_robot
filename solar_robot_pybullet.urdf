@@ -239,7 +239,7 @@
   <child link="bridge_link"/>
   <origin xyz="0 0 0"/>
   <axis xyz="1 0 0"/>
-  <limit lower="-.95" upper=".95" effort="400" velocity="0.4"/>
+  <limit lower="-.93" upper=".93" effort="1000" velocity="0.8"/>
 </joint>
 
 <!-- ================= ROBOT SLIDING CARRIAGE ================= -->

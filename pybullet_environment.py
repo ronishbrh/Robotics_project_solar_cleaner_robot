@@ -80,7 +80,7 @@ class SolarPanelEnvironment:
     # ------------------------------------------------------------------ #
     def _build_panels(self):
         tilt = math.radians(self.panel_tilt_deg)
-        r_step = (self.PANEL_LENGTH + self.PANEL_GAP )* math.cos(tilt) 
+        r_step = (self.PANEL_LENGTH + self.PANEL_GAP) * math.cos(tilt)
         c_step = self.PANEL_WIDTH + self.PANEL_COL_GAP
         ht = self.PANEL_THICKNESS / 2
 
@@ -135,12 +135,16 @@ class SolarPanelEnvironment:
 
         # Spawn robot above panel (0,0), aligned to panel slope
         spawn = [
-            p0[0] + self.panel_normal[0] * (0.105 + self.PANEL_THICKNESS/2) - math.cos(tilt) * (self.PANEL_LENGTH/2 - 0.25),
+            p0[0]
+            + self.panel_normal[0] * (0.105 + self.PANEL_THICKNESS / 2)
+            - math.cos(tilt) * (self.PANEL_LENGTH / 2 - 0.25),
             col0_y,
-            p0[2]+ self.panel_normal[2] * (0.105 + self.PANEL_THICKNESS/2) - math.sin(tilt) * (self.PANEL_LENGTH/2 - 0.25)
+            p0[2]
+            + self.panel_normal[2] * (0.105 + self.PANEL_THICKNESS / 2)
+            - math.sin(tilt) * (self.PANEL_LENGTH / 2 - 0.25),
         ]
 
-        orn = p.getQuaternionFromEuler([-tilt, 0, math.pi/2])
+        orn = p.getQuaternionFromEuler([-tilt, 0, math.pi / 2])
 
         self.robot_id = p.loadURDF(
             urdf_path,
@@ -179,7 +183,7 @@ class SolarPanelEnvironment:
                 p.POSITION_CONTROL,
                 targetPosition=0,
                 force=300,
-                maxVelocity=0.1,
+                maxVelocity=0.3,
             )
 
         for name in (
@@ -347,6 +351,12 @@ class SolarPanelEnvironment:
             if d < best_d:
                 best_d, best = d, (r, c)
         return best
+
+    def get_robot_yaw(self):
+        """Returns current robot yaw in radians"""
+        pos, orn = p.getBasePositionAndOrientation(self.robot_id)
+        _, _, yaw = p.getEulerFromQuaternion(orn)
+        return yaw
 
     def step(self):
         p.stepSimulation()
