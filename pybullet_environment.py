@@ -80,7 +80,7 @@ class SolarPanelEnvironment:
     # ------------------------------------------------------------------ #
     def _build_panels(self):
         tilt = math.radians(self.panel_tilt_deg)
-        r_step = self.PANEL_LENGTH * math.cos(tilt) + self.PANEL_GAP
+        r_step = (self.PANEL_LENGTH + self.PANEL_GAP )* math.cos(tilt) 
         c_step = self.PANEL_WIDTH + self.PANEL_COL_GAP
         ht = self.PANEL_THICKNESS / 2
 
@@ -97,7 +97,8 @@ class SolarPanelEnvironment:
                 cx = row * r_step
                 cy = col * c_step - 1.5 * c_step
                 # raise each successive row by its height on the slope
-                cz = ht + 0.002 + cx * math.tan(tilt)
+                cz = cx * math.tan(tilt) + self.PANEL_WIDTH
+
                 orn = p.getQuaternionFromEuler([0, -tilt, 0])
 
                 hl, hw = self.PANEL_LENGTH / 2, self.PANEL_WIDTH / 2
@@ -129,17 +130,17 @@ class SolarPanelEnvironment:
 
     def _load_robot(self, urdf_path):
         tilt = math.radians(self.panel_tilt_deg)
-        col0_y = -1.80 * (self.PANEL_WIDTH + self.PANEL_COL_GAP)
+        col0_y = -1.75 * (self.PANEL_WIDTH + self.PANEL_COL_GAP)
         p0 = self.panel_ids[0]["pos"]
 
         # Spawn robot above panel (0,0), aligned to panel slope
         spawn = [
-            p0[0] - 0.55 * math.cos(tilt),
+            p0[0] + self.panel_normal[0] * (0.105 + self.PANEL_THICKNESS/2) - math.cos(tilt) * (self.PANEL_LENGTH/2 - 0.25),
             col0_y,
-            p0[2] + 0.40 * math.sin(tilt) + 0.16,
+            p0[2]+ self.panel_normal[2] * (0.105 + self.PANEL_THICKNESS/2) - math.sin(tilt) * (self.PANEL_LENGTH/2 - 0.25)
         ]
 
-        orn = p.getQuaternionFromEuler([0, -tilt, math.pi/2])
+        orn = p.getQuaternionFromEuler([-tilt, 0, math.pi/2])
 
         self.robot_id = p.loadURDF(
             urdf_path,
