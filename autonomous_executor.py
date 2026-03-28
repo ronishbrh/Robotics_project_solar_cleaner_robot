@@ -262,9 +262,9 @@ def clean_panel(robot, last_panel_in_row=False):
 # ─────────────────────────────────────────────
 def generate_path(rows=3, cols=4):
     path = []
-    for r in range(rows):
-        row_cols = range(cols) if r % 2 == 0 else reversed(range(cols))
-        for c in row_cols:
+    for c in range(cols):
+        col_rows = range(rows) if c % 2 == 0 else reversed(range(rows))
+        for r in col_rows:
             path.append((r, c))
     return path
 
@@ -292,7 +292,7 @@ def run_autonomous(env):
     for r, c in path:
         print(f"\n>>> PANEL ({r},{c})")
 
-        clean_panel(robot, r + 1 == rows)
+        clean_panel(robot, last_panel_in_row= r + 1 == rows)
 
         if r+1 == rows:
             if robot.alternating_in_panel == robot.alternating_across_panels:
