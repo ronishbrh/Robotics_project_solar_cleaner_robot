@@ -54,7 +54,7 @@ class AutoRobot:
             self.ctrl.apply_suction_on_base(6500)
         if self.ctrl.suction_at_pads_on:
             self.ctrl.apply_suction_on_legs(4000)
-        time.sleep(SIM_DT * SLOW)
+        # time.sleep(SIM_DT/2)
 
     def stop(self):
         self.ctrl._stop_wheels()
@@ -70,13 +70,13 @@ class AutoRobot:
 
     def bridge_forward(self):  # key 1
         print("  [1] BRIDGE FORWARD")
-        self.ctrl.bridge = min(self.ctrl.bridge + 0.10, 0.27)
+        self.ctrl.bridge = min(self.ctrl.bridge + 0.10, 0.3)
         self.ctrl._set_bridge(self.ctrl.bridge)
         self.wait(40)
 
     def bridge_backward(self):  # key 2
         print("  [2] BRIDGE BACKWARD")
-        self.ctrl.bridge = max(self.ctrl.bridge - 0.10, -0.27)
+        self.ctrl.bridge = max(self.ctrl.bridge - 0.10, -0.3)
         self.ctrl._set_bridge(self.ctrl.bridge)
         self.wait(40)
 
@@ -274,7 +274,7 @@ def clean_panel(robot, last_panel_in_row=False):
             # cross_gap(robot)
             # print("cross gap finish")
 
-        safe_backward(robot, steps=65)
+        safe_backward(robot, steps=60)
 
         if pass_n + 1 == robot.PASSES and last_panel_in_row:
             break
@@ -284,9 +284,9 @@ def clean_panel(robot, last_panel_in_row=False):
             rotate_left_exact(robot)
             if pass_n + 1 == robot.PASSES:
                 break
-            result = safe_forward(robot, max_steps=358 + int((48) * math.sin(math.radians(robot.env.panel_tilt_deg))) * (1 if robot.alternating_across_panels == "left" else -1) + (50 if pass_n + 2 == robot.PASSES else 0))
+            result = safe_forward(robot, max_steps=358 + int((90) * math.sin(math.radians(robot.env.panel_tilt_deg))) * (1 if robot.alternating_across_panels == "left" else -1) + (90 if pass_n + 2 == robot.PASSES else 0))
             if result == "gap":
-                safe_backward(robot, steps=40 + int((8) * math.sin(math.radians(robot.env.panel_tilt_deg))) * (-1 if robot.alternating_across_panels == "left" else 1))
+                safe_backward(robot, steps=55 + int((22 + (5 if pass_n + 2 == robot.PASSES else 0)) * math.sin(math.radians(robot.env.panel_tilt_deg))) * (-1 if robot.alternating_across_panels == "left" else 1))
             # rotate_left(robot, steps=TURN_STEPS)
             rotate_left_exact(robot)
             robot.alternating_in_panel = "right"
@@ -295,9 +295,9 @@ def clean_panel(robot, last_panel_in_row=False):
             rotate_right_exact(robot)
             if pass_n + 1 == robot.PASSES:
                 break
-            result = safe_forward(robot, max_steps=358 + int((48) * math.sin(math.radians(robot.env.panel_tilt_deg))) * (1 if robot.alternating_across_panels == "left" else -1) + (50 if pass_n + 2 == robot.PASSES else 0))
+            result = safe_forward(robot, max_steps=358 + int((90) * math.sin(math.radians(robot.env.panel_tilt_deg))) * (1 if robot.alternating_across_panels == "left" else -1) + (90 if pass_n + 2 == robot.PASSES else 0))
             if result == "gap":
-                safe_backward(robot, steps=40 + int((8) * math.sin(math.radians(robot.env.panel_tilt_deg))) * (-1 if robot.alternating_across_panels == "left" else 1))
+                safe_backward(robot, steps=55 + int((22 + (5 if pass_n + 2 == robot.PASSES else 0)) * math.sin(math.radians(robot.env.panel_tilt_deg))) * (-1 if robot.alternating_across_panels == "left" else 1))
             # rotate_right(robot, steps=TURN_STEPS)
             rotate_right_exact(robot)
             robot.alternating_in_panel = "left"
@@ -357,11 +357,15 @@ def run_autonomous(env):
         if r == last_row:
             if robot.alternating_in_panel == robot.alternating_across_panels:
                 if robot.alternating_across_panels == "left":
-                    rotate_left_exact(robot, degrees=180)
+                    rotate_left_exact(robot, degrees=90)
+                    safe_forward(robot, int(60* math.sin(math.radians(robot.env.panel_tilt_deg))) * (1 if robot.alternating_across_panels == "left" else -1))
+                    rotate_left_exact(robot, degrees=90)
                     # rotate_left(robot, steps=TURN_STEPS*2)
                     robot.alternating_across_panels = "right"
                 elif robot.alternating_across_panels == "right":
-                    rotate_right_exact(robot, degrees=180)
+                    rotate_left_exact(robot, degrees=90)
+                    safe_forward(robot, int(60* math.sin(math.radians(robot.env.panel_tilt_deg))) * (1 if robot.alternating_across_panels == "left" else -1))
+                    rotate_left_exact(robot, degrees=90)
                     # rotate_right(robot, steps=TURN_STEPS*2)
                     robot.alternating_across_panels = "left"
             else:
@@ -402,7 +406,7 @@ if __name__ == "__main__":
     from pybullet_environment import SolarPanelEnvironment
 
     env = SolarPanelEnvironment(
-        gui=True, urdf_path="solar_robot_pybullet.urdf", panel_tilt_deg=0
+        gui=True, urdf_path="solar_robot_pybullet.urdf", panel_tilt_deg=50
     )
     env.add_dirt_patches()
     run_autonomous(env)
