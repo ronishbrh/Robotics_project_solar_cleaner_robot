@@ -238,7 +238,7 @@ class ManualController:
             color = [1, 0, 0]
             if hit_body in [item['id'] for item in self.env.panel_ids]:
                 color = [0, 1, 0]
-                print("Hit something", res[0][0], [item['id'] for item in self.env.panel_ids])
+                # print("Hit something", res[0][0], [item['id'] for item in self.env.panel_ids])
                 gap = hit_frac * 0.03
                 max_gap = 0.03
                 if gap > max_gap:
